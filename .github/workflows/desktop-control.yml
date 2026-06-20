@@ -22,9 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Penuh: Windows .exe + macOS .dmg + Linux .AppImage/.deb.
-        # (Untuk hemat menit CI, bisa dibatasi ke ubuntu-latest saja.)
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        # Hemat menit CI: push → ubuntu saja (validasi). Untuk installer lengkap
+        # (Windows .exe + macOS .dmg + Linux), pakai "Run workflow" (dispatch) → matrix penuh.
+        os: ${{ (github.event_name == 'push') && fromJSON('["ubuntu-latest"]') || fromJSON('["windows-latest","macos-latest","ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
