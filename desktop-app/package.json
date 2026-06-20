@@ -3,6 +3,8 @@
   "version": "0.0.1",
   "private": true,
   "description": "Pembungkus Electron untuk installer desktop Sistem Kontrol Zylora (Windows/macOS/Linux).",
+  "author": { "name": "Zylora", "email": "noreply@zylora.app" },
+  "homepage": "https://kontrol.13-218-74-178.sslip.io",
   "main": "main.js",
   "scripts": {
     "dist": "electron-builder"
