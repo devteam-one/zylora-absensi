@@ -22,7 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ (github.event_name == 'push') && fromJSON('["ubuntu-latest"]') || fromJSON('["windows-latest","macos-latest","ubuntu-latest"]') }}
+        # Penuh: Windows .exe + macOS .dmg + Linux .AppImage/.deb.
+        # (Untuk hemat menit CI, bisa dibatasi ke ubuntu-latest saja.)
+        os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
