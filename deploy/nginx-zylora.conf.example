@@ -1,0 +1,30 @@
+# Reverse proxy nginx untuk Zylora API → 127.0.0.1:5181 (di-bind lokal oleh service).
+# Salin ke /etc/nginx/sites-available/zylora, sesuaikan server_name, lalu:
+#   sudo ln -s /etc/nginx/sites-available/zylora /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d api.domain-anda.com     # TLS gratis (Let's Encrypt)
+
+server {
+    listen 80;
+    server_name api.domain-anda.com;   # ← ganti dengan domain/sub-domain API Anda
+
+    # Setelah certbot, blok 443 + redirect 80→443 ditambahkan otomatis.
+
+    location / {
+        proxy_pass http://127.0.0.1:5181;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # SSE (jika nanti backend pakai event-stream): jangan buffer.
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+
+# Catatan produksi:
+#  • Backend kini set "Access-Control-Allow-Origin: *". Untuk lebih ketat, batasi
+#    CORS ke origin frontend Anda (ubah CORS di server/api/lib/http.mjs) ATAU
+#    tangani CORS di sini dan hapus dari backend.
+#  • Pastikan security group EC2 hanya membuka 80/443 ke publik, BUKAN 5181.

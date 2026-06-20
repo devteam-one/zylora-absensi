@@ -1,0 +1,20 @@
+[Unit]
+Description=Zylora API (backend absensi QR/barcode)
+Documentation=file:/opt/zylora/api/README.md
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REMOTE_DIR__/api
+EnvironmentFile=/etc/zylora.env
+ExecStart=/usr/bin/node __REMOTE_DIR__/api/server.mjs
+Restart=on-failure
+RestartSec=3
+# Pengetatan dasar (DB perlu tulis ke direktori data).
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

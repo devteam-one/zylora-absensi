@@ -1,0 +1,7 @@
+{
+    "recommendations": [
+        "jacano.vscode-pnpm",
+        "tauri-apps.tauri-vscode",
+        "idleberg.electron-builder"
+    ]
+}

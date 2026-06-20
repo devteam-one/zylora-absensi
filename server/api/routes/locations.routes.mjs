@@ -1,0 +1,138 @@
+// ─── 4.1. Lokasi & QR/Barcode Perusahaan ──────────────────────────────────────
+import { json, ApiError } from "../lib/http.mjs";
+import { requireFields, assert } from "../lib/validate.mjs";
+import { get, all, run } from "../lib/db.mjs";
+import { genId, nowISO } from "../lib/security.mjs";
+import { staticToken, dynamicToken, qrImageUrl } from "../lib/qr.mjs";
+import { requireControl, audit } from "../lib/middleware.mjs";
+
+function ownedLocation(ctx, id) {
+  const loc = get("SELECT * FROM locations WHERE id = ? AND company_id = ?", id, ctx.auth.companyId);
+  if (!loc) throw new ApiError(404, "Lokasi tidak ditemukan", "NOT_FOUND");
+  return loc;
+}
+
+function ownedCode(ctx, locationId, codeId) {
+  ownedLocation(ctx, locationId);
+  const code = get("SELECT * FROM location_codes WHERE id = ? AND location_id = ?", codeId, locationId);
+  if (!code) throw new ApiError(404, "Kode tidak ditemukan", "NOT_FOUND");
+  return code;
+}
+
+// Untuk kode dinamis, token selalu dihitung ulang sesuai jendela waktu saat ini.
+function liveToken(code) {
+  return code.type === "qr_dynamic"
+    ? dynamicToken(code.location_id, code.interval || "hourly")
+    : code.token;
+}
+
+function serializeCode(code) {
+  const token = liveToken(code);
+  return {
+    codeId: code.id,
+    locationId: code.location_id,
+    type: code.type,
+    status: code.status,
+    interval: code.interval,
+    token,
+    qrImageUrl: qrImageUrl(token),
+    active_hours: code.active_start ? { start: code.active_start, end: code.active_end } : null,
+    expires_at: code.expires_at,
+  };
+}
+
+export function register(router) {
+  // Tambah lokasi absensi (cabang/ruangan) + titik GPS untuk validasi LBS.
+  router.post("/api/locations", requireControl, (ctx) => {
+    const b = ctx.body;
+    requireFields(b, ["name"]);
+    const id = genId("loc");
+    run(
+      `INSERT INTO locations (id, company_id, name, address, type, lat, lng, radius_m, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      id, ctx.auth.companyId, b.name, b.address || null, b.type || "office",
+      b.lat ?? null, b.lng ?? null, b.radius_m ?? 100, nowISO(),
+    );
+    audit(ctx, "location.create", { id });
+    json(ctx.res, 201, { locationId: id });
+  });
+
+  router.get("/api/locations", requireControl, (ctx) => {
+    const rows = all("SELECT * FROM locations WHERE company_id = ? ORDER BY name", ctx.auth.companyId);
+    json(ctx.res, 200, rows.map((l) => ({
+      locationId: l.id, name: l.name, address: l.address, type: l.type,
+      lat: l.lat, lng: l.lng, radius_m: l.radius_m,
+    })));
+  });
+
+  // Generate QR statis (untuk dicetak & ditempel).
+  router.post("/api/locations/:locationId/codes", requireControl, (ctx) => {
+    ownedLocation(ctx, ctx.params.locationId);
+    const id = genId("code");
+    const token = staticToken(ctx.params.locationId);
+    run(
+      `INSERT INTO location_codes (id, location_id, type, token, status, expires_at, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      id, ctx.params.locationId, "qr_static", token, "active",
+      ctx.body.expires_at || null, nowISO(), nowISO(),
+    );
+    audit(ctx, "code.static.create", { locationId: ctx.params.locationId, codeId: id });
+    json(ctx.res, 201, { codeId: id, qrImageUrl: qrImageUrl(token) });
+  });
+
+  // Generate QR dinamis (berputar otomatis tiap interval).
+  router.post("/api/locations/:locationId/codes/dynamic", requireControl, (ctx) => {
+    ownedLocation(ctx, ctx.params.locationId);
+    const b = ctx.body;
+    const interval = b.interval === "daily" ? "daily" : "hourly";
+    const id = genId("code");
+    const token = dynamicToken(ctx.params.locationId, interval);
+    run(
+      `INSERT INTO location_codes (id, location_id, type, token, status, interval, active_start, active_end, expires_at, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      id, ctx.params.locationId, "qr_dynamic", token, "active", interval,
+      b.active_hours?.start || null, b.active_hours?.end || null,
+      b.expires_in ? new Date(Date.now() + b.expires_in * 1000).toISOString() : null,
+      nowISO(), nowISO(),
+    );
+    audit(ctx, "code.dynamic.create", { locationId: ctx.params.locationId, codeId: id });
+    json(ctx.res, 201, { codeId: id, type: "qr_dynamic", interval, qrImageUrl: qrImageUrl(token) });
+  });
+
+  // Detail & status kode.
+  router.get("/api/locations/:locationId/codes/:codeId", requireControl, (ctx) => {
+    json(ctx.res, 200, serializeCode(ownedCode(ctx, ctx.params.locationId, ctx.params.codeId)));
+  });
+
+  // Update pengaturan kode (aktif/non-aktif, jadwal).
+  router.put("/api/locations/:locationId/codes/:codeId", requireControl, (ctx) => {
+    ownedCode(ctx, ctx.params.locationId, ctx.params.codeId);
+    const b = ctx.body;
+    const sets = [];
+    const vals = [];
+    if (b.status !== undefined) {
+      assert(["active", "inactive"].includes(b.status), 400, "status: active|inactive");
+      sets.push("status = ?"); vals.push(b.status);
+    }
+    if (b.interval !== undefined) { sets.push("interval = ?"); vals.push(b.interval); }
+    if (b.active_hours?.start !== undefined) { sets.push("active_start = ?"); vals.push(b.active_hours.start); }
+    if (b.active_hours?.end !== undefined) { sets.push("active_end = ?"); vals.push(b.active_hours.end); }
+    assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
+    sets.push("updated_at = ?"); vals.push(nowISO());
+    run(`UPDATE location_codes SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.params.codeId);
+    audit(ctx, "code.update", { codeId: ctx.params.codeId });
+    json(ctx.res, 200, serializeCode(ownedCode(ctx, ctx.params.locationId, ctx.params.codeId)));
+  });
+
+  // Regenerasi QR dinamis manual (paksa token jendela baru).
+  router.post("/api/locations/:locationId/codes/:codeId/refresh", requireControl, (ctx) => {
+    const code = ownedCode(ctx, ctx.params.locationId, ctx.params.codeId);
+    assert(code.type === "qr_dynamic", 400, "Hanya kode dinamis yang bisa di-refresh", "NOT_DYNAMIC");
+    const token = dynamicToken(ctx.params.locationId, code.interval || "hourly");
+    const expires_at = new Date(Date.now() + (code.interval === "daily" ? 86400 : 3600) * 1000).toISOString();
+    run("UPDATE location_codes SET token = ?, expires_at = ?, updated_at = ? WHERE id = ?",
+      token, expires_at, nowISO(), ctx.params.codeId);
+    audit(ctx, "code.refresh", { codeId: ctx.params.codeId });
+    json(ctx.res, 200, { newCode: token, qrImageUrl: qrImageUrl(token), expires_at });
+  });
+}

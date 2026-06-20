@@ -1,0 +1,24 @@
+{
+  "name": "zylora-sistem-kontrol-desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Pembungkus Electron untuk installer desktop Sistem Kontrol Zylora (Windows/macOS/Linux).",
+  "main": "main.js",
+  "scripts": {
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "id.zylora.kontrol",
+    "productName": "Zylora Sistem Kontrol",
+    "files": ["main.js", "www/**/*"],
+    "directories": { "output": "dist-installers" },
+    "win": { "target": "nsis", "artifactName": "ZyloraSistemKontrol-Setup-${version}.${ext}" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
+    "mac": { "target": "dmg", "category": "public.app-category.business" },
+    "linux": { "target": ["AppImage", "deb"], "category": "Office" }
+  }
+}
