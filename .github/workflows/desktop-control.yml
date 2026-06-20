@@ -44,6 +44,11 @@ jobs:
       - name: Build installer (electron-builder)
         working-directory: desktop-app
         shell: bash
+        env:
+          # Code-signing Windows OTOMATIS bila kedua secret ini di-set di repo
+          # (Settings → Secrets → Actions). Kosong = build unsigned (default).
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
           npm install --no-audit --no-fund
           npx electron-builder --publish never
