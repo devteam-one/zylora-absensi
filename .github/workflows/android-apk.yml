@@ -1,20 +1,26 @@
 name: Build Android APK (Zylora)
 
 # Membungkus frontend Zylora (PWA) jadi APK Android via Capacitor.
-# Trigger manual: Actions → "Build Android APK (Zylora)" → Run workflow.
-# Mesin lokal tidak punya Android SDK/Gradle modern; build dijalankan di CI ini.
+# Jalan saat push ke main (otomatis) ATAU manual (Actions → Run workflow).
+# Mesin lokal tak punya Android SDK/Gradle modern; build dijalankan di CI ini.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       api_url:
-        description: "URL API Zylora (https://...) yang dipanggil app"
-        required: true
-        default: "https://api.example.com"
+        description: "URL API Zylora (https://...)"
+        required: false
+        default: "https://api.13-218-74-178.sslip.io"
       role:
         description: "Frontend yang dibungkus: employee | control"
-        required: true
+        required: false
         default: "employee"
+
+env:
+  API_URL: ${{ github.event.inputs.api_url || 'https://api.13-218-74-178.sslip.io' }}
+  ROLE: ${{ github.event.inputs.role || 'employee' }}
 
 jobs:
   apk:
@@ -34,21 +40,19 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build web (frontend ${{ github.event.inputs.role }})
+      - name: Build web (frontend ${{ env.ROLE }})
         run: |
-          corepack enable
-          pnpm install --no-frozen-lockfile
-          pnpm add -D react@18.3.1 react-dom@18.3.1
-          printf 'VITE_API_URL=%s\n' "${{ github.event.inputs.api_url }}" > .env.production.local
-          VITE_ROLE=${{ github.event.inputs.role }} pnpm exec vite build \
-            --outDir "dist-${{ github.event.inputs.role }}" --emptyOutDir
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm install --no-audit --no-fund react@18.3.1 react-dom@18.3.1
+          printf 'VITE_API_URL=%s\n' "$API_URL" > .env.production.local
+          VITE_ROLE="$ROLE" npx vite build --outDir "dist-$ROLE" --emptyOutDir
 
       - name: Wrap with Capacitor
         working-directory: android-app
         run: |
           rm -rf www && mkdir -p www
-          cp -r "../dist-${{ github.event.inputs.role }}/." www/
-          npm install
+          cp -r "../dist-$ROLE/." www/
+          npm install --no-audit --no-fund
           npx cap add android || true
           npx cap sync android
 
@@ -61,12 +65,9 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: zylora-${{ github.event.inputs.role }}-apk
+          name: zylora-${{ env.ROLE }}-apk
           path: android-app/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-# Catatan:
-#  • Ini menghasilkan APK *debug* (bisa di-sideload utk uji). Untuk rilis/Play Store,
-#    tambahkan keystore (signing) + tugas assembleRelease + signing config.
-#  • appId = id.zylora.absensi (lihat android-app/capacitor.config.json).
-#  • Build pertama bisa perlu penyesuaian versi (Capacitor 6 butuh Android SDK 34+).
+# Catatan: APK *debug* (sideload utk uji). Untuk rilis/Play Store: tambah keystore
+# (signing) + assembleRelease. appId = id.zylora.absensi (capacitor.config.json).

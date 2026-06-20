@@ -1,23 +1,28 @@
 name: Build Desktop Installer — Sistem Kontrol
 
-# Membungkus frontend "Sistem Kontrol" jadi installer desktop lintas-OS
-# (Windows .exe/NSIS, macOS .dmg, Linux .AppImage/.deb) via Electron + electron-builder.
-# Build per-OS di runner masing-masing (matrix). Trigger manual.
+# Membungkus frontend "Sistem Kontrol" jadi installer desktop via Electron.
+# - push ke main → hanya ubuntu (validasi pipeline murah)
+# - manual (Run workflow) → Windows .exe + macOS .dmg + Linux .AppImage/.deb
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       api_url:
-        description: "URL API Zylora (https://...) yang dipanggil panel kontrol"
-        required: true
-        default: "https://api.example.com"
+        description: "URL API Zylora (https://...)"
+        required: false
+        default: "https://api.13-218-74-178.sslip.io"
+
+env:
+  API_URL: ${{ github.event.inputs.api_url || 'https://api.13-218-74-178.sslip.io' }}
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: ${{ (github.event_name == 'push') && fromJSON('["ubuntu-latest"]') || fromJSON('["windows-latest","macos-latest","ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -29,17 +34,16 @@ jobs:
       - name: Build web (Sistem Kontrol, base relatif untuk file://)
         shell: bash
         run: |
-          corepack enable
-          pnpm install --no-frozen-lockfile
-          pnpm add -D react@18.3.1 react-dom@18.3.1
-          printf 'VITE_API_URL=%s\n' "${{ github.event.inputs.api_url }}" > .env.production.local
-          VITE_ROLE=control pnpm exec vite build --base ./ --outDir desktop-app/www --emptyOutDir
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm install --no-audit --no-fund react@18.3.1 react-dom@18.3.1
+          printf 'VITE_API_URL=%s\n' "$API_URL" > .env.production.local
+          VITE_ROLE=control npx vite build --base ./ --outDir desktop-app/www --emptyOutDir
 
       - name: Build installer (electron-builder)
         working-directory: desktop-app
         shell: bash
         run: |
-          npm install
+          npm install --no-audit --no-fund
           npx electron-builder --publish never
 
       - name: Upload installer
@@ -53,8 +57,5 @@ jobs:
             desktop-app/dist-installers/*.deb
           if-no-files-found: warn
 
-# Catatan:
-#  • Web dibangun dengan `--base ./` agar aset termuat via file:// di Electron.
-#  • Installer Windows tidak ditandatangani (SmartScreen mungkin memperingatkan);
-#    untuk produksi tambahkan sertifikat code-signing (CSC_LINK/CSC_KEY_PASSWORD).
-#  • appId = id.zylora.kontrol (lihat desktop-app/package.json).
+# Catatan: Windows tak ditandatangani (SmartScreen). Untuk produksi tambah
+# code-signing (CSC_LINK/CSC_KEY_PASSWORD). appId = id.zylora.kontrol.
