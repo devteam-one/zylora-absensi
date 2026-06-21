@@ -559,7 +559,7 @@ function ControlLogin({ onLogin }: { onLogin: (email: string, password: string) 
   );
 }
 
-function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRejectLeave, employees, onCreateEmployee, onUpdateEmployee, onDeleteEmployee, onResetCode, authed, onLogin, onLogout, qrVariant, setQrVariant, qrInterval, setQrInterval }: {
+function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRejectLeave, employees, onCreateEmployee, onUpdateEmployee, onDeleteEmployee, onResetCode, authed, onLogin, onLogout, token, locations, onCreateLocation, onCreateLocationQr, qrVariant, setQrVariant, qrInterval, setQrInterval }: {
   attendance: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
   onApproveLeave: (id: string) => void;
