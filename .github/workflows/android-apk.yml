@@ -45,7 +45,9 @@ jobs:
           npm install --no-audit --no-fund --legacy-peer-deps
           npm install --no-audit --no-fund react@18.3.1 react-dom@18.3.1
           printf 'VITE_API_URL=%s\n' "$API_URL" > .env.production.local
-          VITE_ROLE="$ROLE" npx vite build --outDir "dist-$ROLE" --emptyOutDir
+          # Wajibkan API URL: APK yang menunjuk loopback tak berguna di perangkat.
+          VITE_API_URL="$API_URL" VITE_REQUIRE_API_URL=1 VITE_ROLE="$ROLE" \
+            npx vite build --outDir "dist-$ROLE" --emptyOutDir
 
       - name: Wrap with Capacitor
         working-directory: android-app
@@ -56,11 +58,23 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
+      - name: Bump app version (tiap APK = update, bukan reinstall yang ditolak)
+        working-directory: android-app/android
+        run: |
+          # android/ di-regenerate tiap build → build.gradle selalu lahir
+          # versionCode 1 / versionName "1.0". Naikkan dari run_number agar
+          # Android menganggap APK baru sebagai pembaruan & membuang app lama.
+          VC="${{ github.run_number }}"
+          sed -i -E "s/versionCode [0-9]+/versionCode ${VC}/" app/build.gradle
+          sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.0.${VC}\"/" app/build.gradle
+          grep -E "versionCode|versionName" app/build.gradle
+
       - name: Build APK (debug)
         working-directory: android-app/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          # clean lebih dulu agar tak memakai artefak build lama (cache).
+          ./gradlew clean assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v7
