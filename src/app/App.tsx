@@ -4,7 +4,7 @@ import {
   QrCode, Users, Clock, CheckCircle2, LogOut, Shield,
   Calendar, MapPin, Search, Check, X, Scan, Bell,
   Building2, Timer, RefreshCw, FileText, BarChart2,
-  UserCheck, UserX, Download, Activity, Wifi,
+  UserCheck, UserX, Download, Activity, Wifi, WifiOff,
   Smartphone, Monitor, ArrowRight, ChevronRight,
   AlertTriangle, Eye, RotateCcw, Camera, Zap
 } from "lucide-react";
@@ -58,6 +58,17 @@ function useClock() {
   const [now, setNow] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
   return now;
+}
+
+// Status koneksi perangkat (ada internet atau tidak), reaktif.
+function useOnline() {
+  const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
+  useEffect(() => {
+    const on = () => setOnline(true), off = () => setOnline(false);
+    window.addEventListener("online", on); window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+  return online;
 }
 
 function useDynamicQR(intervalSec: number) {
@@ -172,6 +183,17 @@ function QrScanner({ onDecoded, onError }: { onDecoded: (text: string) => void; 
 
 // Banner update OTA (self-host EC2): bandingkan versionCode build (di-bake) dengan
 // manifest /downloads/version.json; bila ada versi lebih baru → tawarkan unduh APK.
+// Banner merah saat perangkat tak ada internet — absensi & data tak tersinkron.
+function OfflineBanner() {
+  const online = useOnline();
+  if (online) return null;
+  return (
+    <div className="bg-red-600 text-white px-4 py-2 flex items-center justify-center gap-2 text-sm flex-shrink-0">
+      <WifiOff className="w-4 h-4 flex-shrink-0" />Tidak ada internet — absensi tak bisa dikirim
+    </div>
+  );
+}
+
 function UpdateBanner({ role }: { role: string }) {
   const [upd, setUpd] = useState<{ versionName?: string; url: string } | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -270,6 +292,7 @@ function QRLokasiEmployeeApp() {
 
   return (
     <div className="flex flex-col h-full bg-background">
+      <OfflineBanner />
       <UpdateBanner role="employee" />
       {/* Header */}
       <div className="bg-[#1B3D72] px-5 py-4 flex items-center justify-between flex-shrink-0">
@@ -465,7 +488,7 @@ function ControlLogin({ onLogin }: { onLogin: (email: string, password: string) 
   );
 }
 
-function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRejectLeave, employees, onCreateEmployee, onUpdateEmployee, onDeleteEmployee, onResetCode, authed, onLogin, onLogout, token, locations, onCreateLocation, onCreateLocationQr, qrVariant, setQrVariant, qrInterval, setQrInterval }: {
+function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRejectLeave, employees, onCreateEmployee, onUpdateEmployee, onDeleteEmployee, onResetCode, authed, onLogin, onLogout, token, connected, locations, onCreateLocation, onCreateLocationQr, qrVariant, setQrVariant, qrInterval, setQrInterval }: {
   attendance: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
   onApproveLeave: (id: string) => void;
@@ -479,6 +502,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
   onLogin: (email: string, password: string) => Promise<void>;
   onLogout: () => void;
   token: string | null;
+  connected: boolean;
   locations: ApiLocation[];
   onCreateLocation: (b: LocationInput) => Promise<void>;
   onCreateLocationQr: (locationId: string, interval?: "hourly" | "daily") => Promise<{ qrImageUrl: string }>;
@@ -486,6 +510,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
   qrInterval: number; setQrInterval: (n: number) => void;
 }) {
   const now = useClock();
+  const online = useOnline();
   const empName = useCallback((id: string) => employees.find(e => e.employeeId === id), [employees]);
   const initials = (name: string) => name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
   const { timeLeft, qrUrl, staticUrl } = useDynamicQR(qrInterval);
@@ -559,8 +584,9 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
           ))}
         </nav>
         <div className="px-4 py-3 border-t border-white/10">
-          <div className="flex items-center gap-1.5 text-[11px] text-white/50">
-            <Wifi className="w-3 h-3 text-accent" />Tersinkronisasi
+          <div className={`flex items-center gap-1.5 text-[11px] ${connected ? "text-accent" : online ? "text-amber-400" : "text-red-400"}`}>
+            {connected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+            {connected ? "Terhubung ke server" : online ? "Server tak terjangkau" : "Tidak ada internet"}
           </div>
           <p className="font-mono text-white/70 text-xs mt-0.5 mb-2 tabular-nums">{fmtTime(now)}</p>
           <button onClick={onLogout} className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white/70 bg-white/10 hover:bg-white/20 transition-colors">
@@ -1644,6 +1670,7 @@ function useBackendData(enabled = true) {
 
 function QRDisplayPage() {
   const now = useClock();
+  const online = useOnline();
   const [loc, setLoc] = useState<ApiPublicLocation | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -1664,6 +1691,7 @@ function QRDisplayPage() {
     <div className="h-screen w-screen bg-[#0D1B2A] text-white flex flex-col items-center justify-center p-8 relative" style={{ fontFamily: "var(--font-sans)" }}>
       <div className="absolute top-6 left-8 flex items-center gap-2 text-white/60 text-sm">
         <Activity className="w-4 h-4 text-accent" />Zylora Absensi
+        {!online && <span className="flex items-center gap-1 text-red-400 ml-2"><WifiOff className="w-4 h-4" />Tidak ada internet</span>}
       </div>
       <div className="absolute top-6 right-8 font-mono text-2xl font-bold tabular-nums">{fmtTime(now)}</div>
 
@@ -1747,7 +1775,7 @@ export default function App() {
         onApproveLeave={approveLeave} onRejectLeave={rejectLeave}
         employees={employees} onCreateEmployee={createEmployee} onUpdateEmployee={updateEmployee}
         onDeleteEmployee={deleteEmployee} onResetCode={resetEmployeeCode}
-        authed={authed} onLogin={login} onLogout={logout} token={token}
+        authed={authed} onLogin={login} onLogout={logout} token={token} connected={connected}
         locations={locations} onCreateLocation={createLocation} onCreateLocationQr={createLocationQr}
         qrVariant={qrVariant} setQrVariant={setQrVariant} qrInterval={qrInterval} setQrInterval={setQrInterval} />
     </div>
