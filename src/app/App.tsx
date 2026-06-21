@@ -1744,7 +1744,7 @@ export default function App() {
 
   // Sumber kebenaran: backend Zylora (REST API). Data admin hanya diambil untuk
   // peran 'control' (panel). Karyawan & display tak butuh hook admin.
-  const { attendance, leaveRequests, employees, locations, authed, token, login, logout,
+  const { attendance, leaveRequests, employees, locations, authed, token, connected, login, logout,
     approveLeave, rejectLeave, createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode,
     createLocation, createLocationQr } = useBackendData(APP_ROLE === "control");
 
