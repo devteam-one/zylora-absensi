@@ -79,9 +79,6 @@
     "tailwindcss": "4.1.12",
     "vite": "6.3.5"
   },
-  "overrides": {
-    "rollup": "4.61.3"
-  },
   "peerDependencies": {
     "react": "18.3.1",
     "react-dom": "18.3.1"
@@ -92,6 +89,11 @@
     },
     "react-dom": {
       "optional": true
+    }
+  },
+  "pnpm": {
+    "overrides": {
+      "rollup": "4.61.3"
     }
   }
 }
