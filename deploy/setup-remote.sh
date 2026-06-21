@@ -37,6 +37,9 @@ sudo chmod 600 /etc/zylora.env
 sudo cp "$REMOTE_DIR/zylora-api.service" /etc/systemd/system/zylora-api.service
 sudo sed -i "s#__REMOTE_DIR__#$REMOTE_DIR#g; s#__USER__#$RUN_USER#g" /etc/systemd/system/zylora-api.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now zylora-api
+sudo systemctl enable zylora-api
+# restart (bukan `enable --now`): bila service sudah jalan, `--now` TIDAK
+# me-restart, jadi kode baru tak ter-reload → "deploy tak tampak berubah".
+sudo systemctl restart zylora-api
 sleep 2
 sudo systemctl --no-pager --lines=8 status zylora-api || true
