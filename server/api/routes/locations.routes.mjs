@@ -69,6 +69,9 @@ export function register(router) {
   // Generate QR statis (untuk dicetak & ditempel).
   router.post("/api/locations/:locationId/codes", requireControl, (ctx) => {
     ownedLocation(ctx, ctx.params.locationId);
+    // Satu kode statis aktif per lokasi: nonaktifkan yang lama agar tak menumpuk.
+    run("UPDATE location_codes SET status = 'inactive', updated_at = ? WHERE location_id = ? AND type = 'qr_static' AND status = 'active'",
+      nowISO(), ctx.params.locationId);
     const id = genId("code");
     const token = staticToken(ctx.params.locationId);
     run(
@@ -84,6 +87,9 @@ export function register(router) {
   // Generate QR dinamis (berputar otomatis tiap interval).
   router.post("/api/locations/:locationId/codes/dynamic", requireControl, (ctx) => {
     ownedLocation(ctx, ctx.params.locationId);
+    // Satu kode dinamis aktif per lokasi: nonaktifkan yang lama agar tak menumpuk.
+    run("UPDATE location_codes SET status = 'inactive', updated_at = ? WHERE location_id = ? AND type = 'qr_dynamic' AND status = 'active'",
+      nowISO(), ctx.params.locationId);
     const b = ctx.body;
     const interval = b.interval === "daily" ? "daily" : "hourly";
     const id = genId("code");

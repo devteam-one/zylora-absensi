@@ -584,6 +584,20 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
   const initials = (name: string) => name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
   const { timeLeft, qrUrl, staticUrl } = useDynamicQR(qrInterval);
   const [tab, setTab] = useState<"qr_display" | "kehadiran" | "izin_cuti" | "karyawan" | "lokasi" | "shift" | "perangkat" | "riwayat" | "penggajian" | "kurs" | "pengaturan" | "log">("qr_display");
+  // Data ASLI dari server untuk pratinjau QR (bukan hardcoded/client-side).
+  const [companyName, setCompanyName] = useState("");
+  const [pubLoc, setPubLoc] = useState<ApiPublicLocation | null>(null);
+  useEffect(() => {
+    if (!authed || !token) return;
+    let alive = true;
+    const tick = () => {
+      api.company(token).then(c => alive && setCompanyName(c.name)).catch(() => {});
+      api.publicLocation().then(p => alive && setPubLoc(p)).catch(() => alive && setPubLoc(null));
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, [authed, token]);
 
   // Belum login → layar login admin (ganti auto-login demo). Setelah semua hooks
   // agar tidak melanggar rules-of-hooks.
@@ -727,40 +741,27 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
                 </div>
 
                 <div className="bg-[#1B3D72] rounded-2xl p-5 w-full flex flex-col items-center gap-3">
-                  <p className="text-white/80 text-xs font-semibold uppercase tracking-widest">PT. Nusantara Digital</p>
-                  <p className="text-white font-bold text-sm">Absensi Harian — Kantor Pusat</p>
+                  <p className="text-white/80 text-xs font-semibold uppercase tracking-widest">{companyName || "—"}</p>
+                  <p className="text-white font-bold text-sm">{pubLoc?.name || "Belum ada lokasi/QR aktif"}</p>
 
-                  <div className="relative bg-white rounded-xl p-3 shadow-lg">
-                    <img src={qrVariant === "dynamic" ? qrUrl : staticUrl}
-                      alt="QR Lokasi" width={160} height={160}
-                      className="block rounded-sm" />
-                    {qrVariant === "dynamic" && (
-                      <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-primary flex items-center justify-center">
-                        <Zap className="w-3 h-3 text-white" />
-                      </div>
-                    )}
-                  </div>
-
-                  {qrVariant === "dynamic" ? (
-                    <div className="flex items-center gap-3">
-                      <svg width={52} height={52} viewBox="0 0 52 52">
-                        <circle cx={26} cy={26} r={22} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={4} />
-                        <circle cx={26} cy={26} r={22} fill="none" stroke="#0EA472" strokeWidth={4}
-                          strokeDasharray={`${dash} ${circum}`}
-                          strokeLinecap="round"
-                          style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: "stroke-dasharray 1s linear" }} />
-                        <text x={26} y={30} textAnchor="middle" fill="white" fontSize={13} fontWeight={700} fontFamily="monospace">{timeLeft}</text>
-                      </svg>
-                      <div>
-                        <p className="text-white text-xs font-semibold">Berganti dalam {timeLeft}d</p>
-                        <p className="text-white/50 text-[10px]">Interval: {qrInterval >= 3600 ? `${qrInterval/3600} jam` : `${qrInterval/60} menit`}</p>
-                      </div>
+                  {pubLoc?.qrImageUrl ? (
+                    <div className="relative bg-white rounded-xl p-3 shadow-lg">
+                      <img src={pubLoc.qrImageUrl} alt="QR Lokasi" width={160} height={160} className="block rounded-sm" />
+                      {pubLoc.type === "qr_dynamic" && (
+                        <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-primary flex items-center justify-center"><Zap className="w-3 h-3 text-white" /></div>
+                      )}
                     </div>
                   ) : (
-                    <p className="text-white/50 text-xs">Kode Statis — Tidak Berubah</p>
+                    <div className="w-[160px] h-[160px] bg-white/10 rounded-xl flex items-center justify-center text-white/40 text-[11px] text-center p-4">Buat QR dulu di tab<br/>"Lokasi & QR"</div>
                   )}
 
-                  <p className="text-white/40 text-[10px] font-mono">Pindai menggunakan aplikasi karyawan</p>
+                  {pubLoc?.type === "qr_dynamic" && pubLoc.serial != null ? (
+                    <p className="text-white text-xs font-semibold">Nomor Seri #{pubLoc.serial} · sekali pakai</p>
+                  ) : pubLoc?.type === "qr_static" ? (
+                    <p className="text-white/50 text-xs">Kode Statis — tetap</p>
+                  ) : null}
+
+                  <p className="text-white/40 text-[10px] font-mono">Sinkron langsung dari server · pindai dgn app karyawan</p>
                 </div>
               </div>
             </div>
@@ -1621,7 +1622,7 @@ function TerminalScanKiosk({ attendance, onCheckIn, onCheckOut }: {
             </div>
             <div className="flex gap-3">
               <div className={`px-4 py-2 rounded-full text-sm font-semibold ${action === "in" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-sky-500/20 text-sky-400 border border-sky-500/30"}`}>
-                <MapPin className="w-3.5 h-3.5 inline mr-1" />Kantor Pusat Jakarta ✓
+                <MapPin className="w-3.5 h-3.5 inline mr-1" />Lokasi terverifikasi ✓
               </div>
             </div>
           </motion.div>
@@ -1681,7 +1682,7 @@ function TerminalScanKiosk({ attendance, onCheckIn, onCheckOut }: {
           <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
           Terhubung ke sistem kontrol (port :5174)
         </div>
-        <p className="text-xs text-white/30 font-mono">PT. NUSANTARA DIGITAL</p>
+        <p className="text-xs text-white/30 font-mono">ZYLORA ABSENSI</p>
       </div>
     </div>
   );
