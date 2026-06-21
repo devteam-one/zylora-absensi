@@ -34,18 +34,36 @@ Di mesin ber-Android SDK 34+, JDK 21, Node 22:
 VITE_API_URL=https://api-anda VITE_ROLE=employee pnpm exec vite build --outDir dist-employee
 cd android-app && mkdir -p www && cp -r ../dist-employee/. www/
 npm install && npx cap add android && npx cap sync android
-cd android && ./gradlew assembleDebug
-# APK: android-app/android/app/build/outputs/apk/debug/app-debug.apk
+node inject-permissions.mjs   # izin kamera + lokasi (scan QR & GPS)
+node inject-signing.mjs       # konfigurasi release signing (debug bila tanpa keystore)
+cd android && ./gradlew assembleRelease
+# APK: android-app/android/app/build/outputs/apk/release/app-release.apk (debug-signed)
 ```
 
 ## Rilis (Play Store / signed)
 
-APK dari workflow ini **debug** (untuk uji/sideload). Untuk rilis:
-- Buat keystore: `keytool -genkey -v -keystore zylora.keystore -alias zylora -keyalg RSA -keysize 2048 -validity 10000`
-- Simpan keystore + password sebagai **GitHub Secrets**, tambahkan signing config di
-  `android-app/android/app/build.gradle`, dan ganti `assembleDebug` → `assembleRelease`
-  (atau `bundleRelease` untuk `.aab` Play Store).
-- `appId` = `id.zylora.absensi` (ubah di `capacitor.config.json` bila perlu).
+Workflow CI + `inject-signing.mjs` sudah menangani signing **otomatis**: bila GitHub
+Secrets keystore di-set, build jadi **release-signed** (APK + `.aab` Play Store);
+bila tidak, **debug-signed** (cukup untuk sideload/uji).
+
+Langkah aktifkan release signing:
+1. Buat keystore (sekali, simpan aman — JANGAN commit):
+   ```bash
+   keytool -genkeypair -v -keystore zylora.keystore -alias zylora \
+     -keyalg RSA -keysize 2048 -validity 10000
+   ```
+2. Encode base64: `base64 -w0 zylora.keystore` (copy hasilnya).
+3. GitHub repo → Settings → Secrets and variables → Actions → tambah 4 secret:
+   - `ANDROID_KEYSTORE_BASE64` = hasil base64 di atas
+   - `ANDROID_KEYSTORE_PASSWORD` = password keystore
+   - `ANDROID_KEY_ALIAS` = `zylora`
+   - `ANDROID_KEY_PASSWORD` = password kunci
+4. Jalankan workflow **Build Android APK** → artefak `zylora-<role>-apk` berisi
+   `app-release.apk` (release-signed) + `app-release.aab` (untuk upload Play Store).
+
+Catatan: setelah pindah dari debug ke release signing, pengguna yang sudah memasang
+versi debug harus **uninstall dulu** (signature beda). `appId` =
+`id.zylora.absensi` (ubah di `capacitor.config.json` bila perlu).
 
 ## Catatan
 

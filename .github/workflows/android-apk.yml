@@ -59,6 +59,8 @@ jobs:
           npx cap sync android
           # Izin kamera + lokasi (scan QR & GPS butuh ini di WebView).
           node inject-permissions.mjs
+          # Konfigurasi release signing (pakai keystore bila secret di-set, selain itu debug).
+          node inject-signing.mjs
 
       - name: Bump app version (tiap APK = update, bukan reinstall yang ditolak)
         working-directory: android-app/android
@@ -71,19 +73,34 @@ jobs:
           sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.0.${VC}\"/" app/build.gradle
           grep -E "versionCode|versionName" app/build.gradle
 
-      - name: Build APK (debug)
+      - name: Build APK + AAB (release; ber-tanda-tangan bila keystore di-set)
         working-directory: android-app/android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ZYLORA_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ZYLORA_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ZYLORA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          # clean lebih dulu agar tak memakai artefak build lama (cache).
-          ./gradlew clean assembleDebug --no-daemon
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/zylora.keystore"
+            export ZYLORA_KEYSTORE="$RUNNER_TEMP/zylora.keystore"
+            echo "→ RELEASE-signed (keystore produksi dari secret) + AAB"
+            ./gradlew clean assembleRelease bundleRelease --no-daemon
+          else
+            echo "→ debug-signed (belum ada secret keystore); set ANDROID_KEYSTORE_BASE64 dll untuk rilis Play Store"
+            ./gradlew clean assembleRelease --no-daemon
+          fi
 
-      - name: Upload APK
+      - name: Upload APK + AAB
         uses: actions/upload-artifact@v7
         with:
           name: zylora-${{ env.ROLE }}-apk
-          path: android-app/android/app/build/outputs/apk/debug/*.apk
+          path: |
+            android-app/android/app/build/outputs/apk/release/*.apk
+            android-app/android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
 
-# Catatan: APK *debug* (sideload utk uji). Untuk rilis/Play Store: tambah keystore
-# (signing) + assembleRelease. appId = id.zylora.absensi (capacitor.config.json).
+# Catatan: build assembleRelease. RELEASE-signed bila secret keystore di-set
+# (ANDROID_KEYSTORE_BASE64/_PASSWORD, ANDROID_KEY_ALIAS/_PASSWORD) → APK + .aab
+# Play Store; selain itu debug-signed (sideload). Lihat android-app/README.md.
