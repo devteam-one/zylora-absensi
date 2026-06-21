@@ -24,6 +24,7 @@ function serialize(emp) {
     start_date: emp.start_date,
     status: emp.status,
     schedule: { in: emp.schedule_in, out: emp.schedule_out },
+    base_salary: emp.base_salary || 0,
     barcode: code?.code || null,
     has_pin: !!emp.password_hash,
   };
@@ -37,11 +38,12 @@ export function register(router) {
     const id = genId("emp");
     const pin = b.password || b.pin;  // PIN/password login app karyawan (opsional)
     run(
-      `INSERT INTO employees (id, company_id, name, email, password_hash, position, department, start_date, status, schedule_in, schedule_out, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO employees (id, company_id, name, email, password_hash, position, department, start_date, status, schedule_in, schedule_out, base_salary, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       id, ctx.auth.companyId, b.name, b.email || null, pin ? hashPassword(String(pin)) : null,
       b.position || null, b.department || null,
-      b.start_date || null, "active", b.schedule_in || "08:00", b.schedule_out || "17:00", nowISO(),
+      b.start_date || null, "active", b.schedule_in || "08:00", b.schedule_out || "17:00",
+      Number(b.base_salary) || 0, nowISO(),
     );
     audit(ctx, "employee.create", { id });
     json(ctx.res, 201, { employeeId: id });
@@ -67,7 +69,7 @@ export function register(router) {
   router.put("/api/employees/:id", requireControl, (ctx) => {
     ownedEmployee(ctx, ctx.params.id);
     const fields = pick(ctx.body, [
-      "name", "email", "position", "department", "start_date", "status", "schedule_in", "schedule_out",
+      "name", "email", "position", "department", "start_date", "status", "schedule_in", "schedule_out", "base_salary",
     ]);
     const keys = Object.keys(fields);
     const pin = ctx.body.password || ctx.body.pin;  // set PIN baru (opsional)

@@ -40,6 +40,7 @@ export type ApiEmployee = {
   schedule: { in: string | null; out: string | null };
   barcode: string | null;
   has_pin?: boolean;
+  base_salary?: number;
 };
 
 export type EmployeeInput = {
@@ -47,6 +48,16 @@ export type EmployeeInput = {
   department?: string | null; start_date?: string | null; status?: string;
   schedule_in?: string; schedule_out?: string;
   password?: string;  // PIN/password login app karyawan
+  base_salary?: number;  // gaji pokok (payroll)
+};
+
+export type SalaryComponent = { id: string; name: string; type: "earning" | "deduction"; basis: string; value: number };
+export type PayrollRule = { id: string; name: string; metric: string; op: string; threshold: number; action: "bonus" | "deduction"; amount: number; active: boolean };
+export type PayrollRun = { runId: string; period: string; created_at: string; count: number; totalNet: number };
+export type Payslip = {
+  id: string; employeeId: string; name: string; period: string;
+  base_salary: number; earnings: number; deductions: number; net: number;
+  detail: { metrics: Record<string, number>; lines: Array<{ name: string; type: string; basis: string; amount: number; note?: string }> } | null;
 };
 
 export type ApiLocation = {
@@ -164,6 +175,22 @@ export const api = {
 
   // Log audit admin
   logs: (token: string) => req<Array<{ id: string; admin_id: string | null; action: string; detail: string | null; ip: string | null; created_at: string }>>("/api/logs", { token }),
+
+  // Payroll (gaji)
+  salaryComponents: (token: string) => req<SalaryComponent[]>("/api/salary-components", { token }),
+  createSalaryComponent: (token: string, body: { name: string; type: string; basis: string; value: number }) =>
+    req<{ id: string }>("/api/salary-components", { method: "POST", token, body }),
+  deleteSalaryComponent: (token: string, id: string) =>
+    req(`/api/salary-components/${id}`, { method: "DELETE", token }),
+  payrollRules: (token: string) => req<PayrollRule[]>("/api/payroll-rules", { token }),
+  createPayrollRule: (token: string, body: { name: string; metric: string; op: string; threshold: number; action: string; amount: number }) =>
+    req<{ id: string }>("/api/payroll-rules", { method: "POST", token, body }),
+  deletePayrollRule: (token: string, id: string) =>
+    req(`/api/payroll-rules/${id}`, { method: "DELETE", token }),
+  runPayroll: (token: string, period: string) =>
+    req<PayrollRun & { runId: string }>("/api/payroll/run", { method: "POST", token, body: { period } }),
+  payrollRuns: (token: string) => req<PayrollRun[]>("/api/payroll/runs", { token }),
+  runPayslips: (token: string, runId: string) => req<Payslip[]>(`/api/payroll/runs/${runId}/payslips`, { token }),
 
   // Auth & self-service KARYAWAN (token peran 'employee', terpisah dari admin)
   employeeLogin: (employeeId: string, password: string) =>

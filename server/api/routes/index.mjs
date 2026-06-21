@@ -8,6 +8,7 @@ import { register as config } from "./config.routes.mjs";
 import { register as attendance } from "./attendance.routes.mjs";
 import { register as publicRoutes } from "./public.routes.mjs";
 import { register as employeeAuth } from "./employee.routes.mjs";
+import { register as payroll } from "./payroll.routes.mjs";
 
 export function registerAll(router) {
   auth(router);
@@ -18,5 +19,6 @@ export function registerAll(router) {
   attendance(router);
   publicRoutes(router);
   employeeAuth(router);
+  payroll(router);
   return router;
 }

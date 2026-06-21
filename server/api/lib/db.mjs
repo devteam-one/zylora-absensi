@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS employees (
   status       TEXT NOT NULL DEFAULT 'active',   -- active | inactive
   schedule_in  TEXT DEFAULT '08:00',
   schedule_out TEXT DEFAULT '17:00',
+  base_salary  REAL NOT NULL DEFAULT 0,          -- gaji pokok (payroll)
   created_at   TEXT NOT NULL
 );
 
@@ -174,7 +175,61 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   ip         TEXT,
   created_at TEXT NOT NULL
 );
+
+-- ─── PAYROLL ──────────────────────────────────────────────────────────────────
+-- Komponen gaji per perusahaan (tunjangan/potongan), tetap atau berbasis absensi.
+CREATE TABLE IF NOT EXISTS salary_components (
+  id         TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  type       TEXT NOT NULL,                       -- earning | deduction
+  basis      TEXT NOT NULL DEFAULT 'fixed',       -- fixed|per_late_min|per_absent_day|per_overtime_hour|percent_base
+  value      REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+-- Aturan otomatis berbasis kondisi (Fase 2): mis. telat>=N hari → potongan.
+CREATE TABLE IF NOT EXISTS payroll_rules (
+  id         TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  metric     TEXT NOT NULL,                       -- late_days|late_minutes|overtime_hours|absent_days|leave_days
+  op         TEXT NOT NULL DEFAULT 'gte',         -- gte|gt
+  threshold  REAL NOT NULL DEFAULT 0,
+  action     TEXT NOT NULL,                       -- bonus|deduction
+  amount     REAL NOT NULL DEFAULT 0,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
+-- Satu kali proses gaji untuk satu periode (YYYY-MM).
+CREATE TABLE IF NOT EXISTS payroll_runs (
+  id         TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  period     TEXT NOT NULL,                       -- YYYY-MM
+  created_by TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- Slip gaji per karyawan per run (rincian disimpan JSON di kolom detail).
+CREATE TABLE IF NOT EXISTS payslips (
+  id          TEXT PRIMARY KEY,
+  run_id      TEXT NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+  company_id  TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  period      TEXT NOT NULL,
+  base_salary REAL NOT NULL DEFAULT 0,
+  earnings    REAL NOT NULL DEFAULT 0,
+  deductions  REAL NOT NULL DEFAULT 0,
+  net         REAL NOT NULL DEFAULT 0,
+  detail      TEXT,
+  created_at  TEXT NOT NULL
+);
 `);
+
+// Migrasi idempoten untuk DB lama (kolom/tabel baru). ALTER melempar bila kolom
+// sudah ada → diabaikan.
+try { db.exec("ALTER TABLE employees ADD COLUMN base_salary REAL NOT NULL DEFAULT 0"); } catch { /* kolom sudah ada */ }
 
 // ─── Helper kueri ─────────────────────────────────────────────────────────────
 export const get = (sql, ...params) => db.prepare(sql).get(...params);
