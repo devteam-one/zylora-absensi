@@ -22,6 +22,10 @@ desktop-app/www/
 desktop-app/dist-installers/
 android-app/www/
 android-app/android/
+android-app/package-lock.json
+
+# IDE
+.idea/
 
 # Design-sync tooling (lihat .design-sync/NOTES.md)
 .ds-sync/
