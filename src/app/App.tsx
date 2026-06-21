@@ -13,14 +13,7 @@ import { Html5Qrcode } from "html5-qrcode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type SystemMode = "qr_lokasi" | "terminal_scan";
 type QRVariant = "static" | "dynamic";
-
-interface Employee {
-  id: string; name: string; department: string;
-  position: string; email: string;
-  scheduleIn: string; scheduleOut: string; avatar: string;
-}
 
 interface AttendanceRecord {
   id: string; employeeId: string; date: string;
@@ -35,39 +28,9 @@ interface LeaveRequest {
   status: "pending" | "approved" | "rejected";
 }
 
-// ─── Static data ──────────────────────────────────────────────────────────────
-
-const EMPLOYEES: Employee[] = [
-  { id: "EMP001", name: "Budi Santoso", department: "Teknologi Informasi", position: "Software Engineer", email: "budi@nusantara.co.id", scheduleIn: "08:00", scheduleOut: "17:00", avatar: "BS" },
-  { id: "EMP002", name: "Dewi Rahayu", department: "Sumber Daya Manusia", position: "HR Manager", email: "dewi@nusantara.co.id", scheduleIn: "08:00", scheduleOut: "17:00", avatar: "DR" },
-  { id: "EMP003", name: "Ahmad Fauzi", department: "Keuangan", position: "Senior Akuntan", email: "ahmad@nusantara.co.id", scheduleIn: "08:00", scheduleOut: "17:00", avatar: "AF" },
-  { id: "EMP004", name: "Siti Nurhaliza", department: "Marketing", position: "Marketing Manager", email: "siti@nusantara.co.id", scheduleIn: "08:00", scheduleOut: "17:00", avatar: "SN" },
-  { id: "EMP005", name: "Rizki Pratama", department: "Operasional", position: "Supervisor", email: "rizki@nusantara.co.id", scheduleIn: "07:00", scheduleOut: "16:00", avatar: "RP" },
-  { id: "EMP006", name: "Nisa Amalia", department: "Teknologi Informasi", position: "UI/UX Designer", email: "nisa@nusantara.co.id", scheduleIn: "08:00", scheduleOut: "17:00", avatar: "NA" },
-  { id: "EMP007", name: "Hendra Wijaya", department: "Keuangan", position: "Finance Staff", email: "hendra@nusantara.co.id", scheduleIn: "08:00", scheduleOut: "17:00", avatar: "HW" },
-  { id: "EMP008", name: "Maya Putri", department: "Marketing", position: "Content Creator", email: "maya@nusantara.co.id", scheduleIn: "09:00", scheduleOut: "18:00", avatar: "MP" },
-];
-
-const todayStr = new Date().toISOString().split("T")[0];
-const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
-
-const INITIAL_ATTENDANCE: AttendanceRecord[] = [
-  { id: "A001", employeeId: "EMP001", date: todayStr, checkIn: "07:58", checkOut: null, status: "hadir", location: "Kantor Pusat Jakarta", method: "terminal" },
-  { id: "A002", employeeId: "EMP002", date: todayStr, checkIn: "08:02", checkOut: null, status: "hadir", location: "Kantor Pusat Jakarta", method: "qr_lokasi" },
-  { id: "A003", employeeId: "EMP003", date: todayStr, checkIn: "08:47", checkOut: null, status: "terlambat", location: "Kantor Pusat Jakarta", method: "qr_lokasi" },
-  { id: "A004", employeeId: "EMP004", date: todayStr, checkIn: null, checkOut: null, status: "izin", location: "—", method: "manual" },
-  { id: "A005", employeeId: "EMP005", date: todayStr, checkIn: "06:54", checkOut: "16:05", status: "hadir", location: "Kantor Pusat Jakarta", method: "terminal" },
-  { id: "A006", employeeId: "EMP006", date: todayStr, checkIn: null, checkOut: null, status: "tidak_hadir", location: "—", method: "manual" },
-  { id: "A007", employeeId: "EMP007", date: todayStr, checkIn: "07:59", checkOut: null, status: "hadir", location: "Kantor Pusat Jakarta", method: "terminal" },
-  { id: "A008", employeeId: "EMP008", date: todayStr, checkIn: null, checkOut: null, status: "tidak_hadir", location: "—", method: "manual" },
-];
-
-const INITIAL_LEAVE: LeaveRequest[] = [
-  { id: "L001", employeeId: "EMP004", type: "izin", startDate: todayStr, endDate: todayStr, reason: "Keperluan keluarga mendesak — orang tua sakit.", status: "approved" },
-  { id: "L002", employeeId: "EMP006", type: "cuti", startDate: todayStr, endDate: tomorrow, reason: "Cuti tahunan yang telah direncanakan.", status: "pending" },
-  { id: "L003", employeeId: "EMP003", type: "izin", startDate: tomorrow, endDate: tomorrow, reason: "Pemeriksaan kesehatan rutin.", status: "pending" },
-  { id: "L004", employeeId: "EMP008", type: "cuti", startDate: todayStr, endDate: todayStr, reason: "Urusan administrasi kependudukan.", status: "rejected" },
-];
+// ─── Konfigurasi tampilan (status & warna departemen) ─────────────────────────
+// Data karyawan/kehadiran/cuti diambil 100% dari backend (lihat useBackendData &
+// api.ts) — tidak ada lagi data contoh/mock di sini.
 
 const STATUS_CFG = {
   hadir:       { label: "Hadir",       color: "bg-emerald-100 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" },
@@ -127,63 +90,6 @@ function useDynamicQR(intervalSec: number) {
 // :5173, admin :5174). They are separate origins, so shared state is bridged
 // through the SSE relay in server/sync-server.mjs instead of React state.
 const APP_ROLE = (import.meta.env.VITE_ROLE || "") as "employee" | "control" | "display" | "";
-// Relay lives next to whatever host served this page (e.g. 127.0.0.2) on :5180.
-const SYNC_URL = typeof window !== "undefined" ? `http://${window.location.hostname}:5180` : "";
-
-type SyncSnapshot = {
-  systemMode: SystemMode;
-  attendance: AttendanceRecord[];
-  leaveRequests: LeaveRequest[];
-};
-
-// Per-tab id used to tag our own posts so we can ignore their echo.
-const CLIENT_ID = Math.random().toString(36).slice(2);
-let syncSeq = 0;
-
-function useSyncedState(
-  enabled: boolean,
-  snapshot: SyncSnapshot,
-  apply: (s: SyncSnapshot) => void,
-) {
-  const applyRef = useRef(apply);
-  applyRef.current = apply;
-  const myTag = useRef("");
-  const body = JSON.stringify(snapshot);
-  // Seed with the initial snapshot so we don't clobber the relay on mount.
-  const sentBody = useRef(body);
-
-  // Receive: adopt any snapshot that isn't the echo of our own last post.
-  useEffect(() => {
-    if (!enabled || !SYNC_URL) return;
-    const es = new EventSource(`${SYNC_URL}/events`);
-    es.onmessage = (e) => {
-      try {
-        const inc = JSON.parse(e.data) as SyncSnapshot & { _tag?: string };
-        if (inc._tag && inc._tag === myTag.current) return; // our own echo
-        const { _tag, ...clean } = inc;
-        // Mark as already-sent so applying it below doesn't bounce back out.
-        sentBody.current = JSON.stringify(clean);
-        applyRef.current(clean as SyncSnapshot);
-      } catch { /* ignore malformed */ }
-    };
-    return () => es.close();
-  }, [enabled]);
-
-  // Send: POST the snapshot whenever it changes locally.
-  useEffect(() => {
-    if (!enabled || !SYNC_URL) return;
-    if (body === sentBody.current) return;
-    sentBody.current = body;
-    const tag = `${CLIENT_ID}-${++syncSeq}`;
-    myTag.current = tag;
-    fetch(`${SYNC_URL}/update`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...snapshot, _tag: tag }),
-      keepalive: true,
-    }).catch(() => { /* relay down — stay local */ });
-  }, [enabled, body]);
-}
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 
@@ -370,8 +276,8 @@ function QRLokasiEmployeeApp() {
         <div className="flex items-center gap-2.5">
           <Smartphone className="w-5 h-5 text-white/80" />
           <div>
-            <p className="font-bold text-white text-sm">Aplikasi Karyawan</p>
-            <p className="text-[10px] text-white/50 font-mono">PORT :5173 · Mode QR Lokasi</p>
+            <p className="font-bold text-white text-sm">Zylora Absensi</p>
+            <p className="text-[10px] text-white/50">Absensi QR Karyawan</p>
           </div>
         </div>
         <div className="text-right">
@@ -626,7 +532,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
             <Shield className="w-4 h-4 text-white/70" />
             <div>
               <p className="font-bold text-white text-sm">Sistem Kontrol</p>
-              <p className="text-[10px] text-white/40 font-mono">PORT :5174</p>
+              <p className="text-[10px] text-white/40">Panel Admin · Desktop</p>
             </div>
           </div>
         </div>
@@ -1552,328 +1458,6 @@ function KursTab({ token }: { token: string }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MODEL 2 — Terminal Scan
-// Port :5173 = Scanner terminal at entrance — reads employee's QR
-// Port :5174 = Admin — standard dashboard
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function TerminalScanKiosk({ attendance, onCheckIn, onCheckOut }: {
-  attendance: AttendanceRecord[];
-  onCheckIn: (empId: string) => void;
-  onCheckOut: (empId: string) => void;
-}) {
-  const now = useClock();
-  const [scanning, setScanning] = useState(false);
-  const [identified, setIdentified] = useState<Employee | null>(null);
-  const [action, setAction] = useState<"in" | "out" | null>(null);
-  const [simEmpId, setSimEmpId] = useState("EMP001");
-
-  const doScan = () => {
-    const emp = EMPLOYEES.find(e => e.id === simEmpId);
-    if (!emp) return;
-    setScanning(true);
-    setIdentified(null);
-    setTimeout(() => {
-      setScanning(false);
-      setIdentified(emp);
-      const rec = attendance.find(a => a.employeeId === emp.id);
-      const act = rec?.checkIn && !rec?.checkOut ? "out" : "in";
-      setAction(act);
-      if (act === "in") onCheckIn(emp.id);
-      else onCheckOut(emp.id);
-      setTimeout(() => { setIdentified(null); setAction(null); }, 4000);
-    }, 2000);
-  };
-
-  return (
-    <div className="flex flex-col h-full bg-[#0D1B2A] text-white">
-      {/* Kiosk Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center">
-            <Monitor className="w-5 h-5 text-white/80" />
-          </div>
-          <div>
-            <p className="font-bold text-white">Terminal Absensi</p>
-            <p className="text-[10px] text-white/40 font-mono">PORT :5173 · Mode Scanner Terminal</p>
-          </div>
-        </div>
-        <div className="text-right">
-          <p className="font-mono text-2xl font-bold tabular-nums">{fmtTime(now)}</p>
-          <p className="text-xs text-white/40">{fmtDate(now)}</p>
-        </div>
-      </div>
-
-      <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6">
-        {identified ? (
-          <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            className="flex flex-col items-center gap-5 text-center">
-            <div className={`w-20 h-20 rounded-full flex items-center justify-center ${action === "in" ? "bg-emerald-500/20" : "bg-sky-500/20"}`}>
-              <CheckCircle2 className={`w-10 h-10 ${action === "in" ? "text-emerald-400" : "text-sky-400"}`} />
-            </div>
-            <div>
-              <p className={`text-2xl font-bold ${action === "in" ? "text-emerald-400" : "text-sky-400"}`}>
-                {action === "in" ? "Selamat Datang!" : "Sampai Jumpa!"}
-              </p>
-              <p className="text-white text-xl font-semibold mt-1">{identified.name}</p>
-              <p className="text-white/50 text-sm">{identified.position} — {identified.department}</p>
-              <p className="text-white/40 text-xs font-mono mt-2">{identified.id} · {action === "in" ? "Check-In" : "Check-Out"} · {nowHHMM()}</p>
-            </div>
-            <div className="flex gap-3">
-              <div className={`px-4 py-2 rounded-full text-sm font-semibold ${action === "in" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-sky-500/20 text-sky-400 border border-sky-500/30"}`}>
-                <MapPin className="w-3.5 h-3.5 inline mr-1" />Lokasi terverifikasi ✓
-              </div>
-            </div>
-          </motion.div>
-        ) : (
-          <>
-            {/* Scanner Viewfinder */}
-            <div className="relative w-56 h-56 flex items-center justify-center">
-              <div className="absolute inset-0 rounded-2xl border-2 border-white/20" />
-              {["top-0 left-0", "top-0 right-0", "bottom-0 left-0", "bottom-0 right-0"].map((p, i) => (
-                <div key={i} className={`absolute ${p} w-8 h-8 border-white/60 border-2 ${i===0?"rounded-tl border-r-0 border-b-0":i===1?"rounded-tr border-l-0 border-b-0":i===2?"rounded-bl border-r-0 border-t-0":"rounded-br border-l-0 border-t-0"}`} />
-              ))}
-
-              {scanning ? (
-                <>
-                  <Scan className="w-12 h-12 text-white/20" />
-                  <motion.div className="absolute left-4 right-4 h-0.5 bg-gradient-to-r from-transparent via-accent to-transparent"
-                    animate={{ y: [-90, 90, -90] }}
-                    transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }} />
-                  <div className="absolute inset-0 bg-accent/5 rounded-xl" />
-                </>
-              ) : (
-                <div className="flex flex-col items-center gap-2 text-white/30">
-                  <Scan className="w-12 h-12" />
-                  <p className="text-xs">Tunjukkan ID Card / QR</p>
-                </div>
-              )}
-            </div>
-
-            <div className="text-center">
-              <p className="text-white/70 text-sm">
-                {scanning ? "Memindai QR karyawan…" : "Siap memindai kartu ID karyawan"}
-              </p>
-            </div>
-
-            {/* Simulation controls */}
-            <div className="bg-white/5 border border-white/10 rounded-xl p-4 w-full max-w-xs">
-              <p className="text-[10px] text-white/30 uppercase tracking-widest mb-3 text-center">Simulasi — Pilih Karyawan</p>
-              <select value={simEmpId} onChange={e => setSimEmpId(e.target.value)}
-                className="w-full bg-white/10 border border-white/20 text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:ring-1 focus:ring-white/30">
-                {EMPLOYEES.map(e => (
-                  <option key={e.id} value={e.id} className="bg-[#0D1B2A]">{e.name} ({e.id})</option>
-                ))}
-              </select>
-              <button onClick={doScan} disabled={scanning}
-                className="w-full py-2.5 rounded-lg bg-accent text-white font-semibold text-sm hover:bg-accent/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
-                <Scan className="w-4 h-4" />
-                {scanning ? "Memindai…" : "Simulasi Scan"}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Bottom bar */}
-      <div className="px-6 py-3 border-t border-white/10 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-2 text-xs text-white/30">
-          <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-          Terhubung ke sistem kontrol (port :5174)
-        </div>
-        <p className="text-xs text-white/30 font-mono">ZYLORA ABSENSI</p>
-      </div>
-    </div>
-  );
-}
-
-function TerminalControlDashboard({ attendance, leaveRequests, onApproveLeave, onRejectLeave }: {
-  attendance: AttendanceRecord[];
-  leaveRequests: LeaveRequest[];
-  onApproveLeave: (id: string) => void;
-  onRejectLeave: (id: string) => void;
-}) {
-  const now = useClock();
-  const [tab, setTab] = useState<"kehadiran" | "izin_cuti" | "karyawan">("kehadiran");
-  const [search, setSearch] = useState("");
-
-  const stats = {
-    hadir: attendance.filter(a => a.status === "hadir").length,
-    terlambat: attendance.filter(a => a.status === "terlambat").length,
-    izin: attendance.filter(a => a.status === "izin" || a.status === "cuti").length,
-    tidakHadir: attendance.filter(a => a.status === "tidak_hadir").length,
-  };
-
-  const filtered = attendance.filter(a => {
-    const emp = EMPLOYEES.find(e => e.id === a.employeeId);
-    return !search || emp?.name.toLowerCase().includes(search.toLowerCase()) || emp?.department.toLowerCase().includes(search.toLowerCase());
-  });
-
-  const approve = onApproveLeave;
-  const reject = onRejectLeave;
-  const pending = leaveRequests.filter(l => l.status === "pending").length;
-
-  return (
-    <div className="flex h-full">
-      <div className="w-52 bg-[#1B3D72] flex flex-col flex-shrink-0">
-        <div className="px-4 py-5 border-b border-white/10">
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-white/70" />
-            <div>
-              <p className="font-bold text-white text-sm">Sistem Kontrol</p>
-              <p className="text-[10px] text-white/40 font-mono">PORT :5174</p>
-            </div>
-          </div>
-        </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {[
-            { key: "kehadiran", label: "Kehadiran", icon: <Activity className="w-4 h-4" />, badge: 0 },
-            { key: "izin_cuti", label: "Izin & Cuti", icon: <FileText className="w-4 h-4" />, badge: pending },
-            { key: "karyawan",  label: "Karyawan",   icon: <Users className="w-4 h-4" />, badge: 0 },
-          ].map(({ key, label, icon, badge }) => (
-            <button key={key} onClick={() => setTab(key as typeof tab)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${tab === key ? "bg-white/20 text-white" : "text-white/60 hover:bg-white/10 hover:text-white"}`}>
-              <span className="flex items-center gap-2">{icon}{label}</span>
-              {badge > 0 && <span className="bg-amber-400 text-amber-900 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{badge}</span>}
-            </button>
-          ))}
-        </nav>
-        <div className="px-4 py-3 border-t border-white/10">
-          <div className="flex items-center gap-1.5 text-[11px] text-white/50"><Wifi className="w-3 h-3 text-accent" />Tersinkronisasi</div>
-          <p className="font-mono text-white/70 text-xs mt-0.5 tabular-nums">{fmtTime(now)}</p>
-        </div>
-      </div>
-
-      <div className="flex-1 flex flex-col overflow-hidden bg-background">
-        <div className="bg-card border-b border-border px-5 py-3 flex items-center justify-between flex-shrink-0">
-          <div>
-            <h1 className="font-bold text-sm">{tab === "kehadiran" ? "Rekap Kehadiran" : tab === "izin_cuti" ? "Manajemen Izin & Cuti" : "Data Karyawan"}</h1>
-            <p className="text-xs text-muted-foreground">{fmtDate(now)}</p>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Monitor className="w-3.5 h-3.5 text-sky-500" />
-            <span>Terminal scan aktif di port :5173</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-auto p-4 space-y-4">
-          {tab === "kehadiran" && (
-            <>
-              <div className="grid grid-cols-4 gap-3">
-                {[
-                  { label: "Hadir", v: stats.hadir, color: "text-emerald-600 bg-emerald-50 border-emerald-100", icon: <UserCheck className="w-4 h-4" /> },
-                  { label: "Terlambat", v: stats.terlambat, color: "text-amber-600 bg-amber-50 border-amber-100", icon: <Timer className="w-4 h-4" /> },
-                  { label: "Izin/Cuti", v: stats.izin, color: "text-blue-600 bg-blue-50 border-blue-100", icon: <FileText className="w-4 h-4" /> },
-                  { label: "Tidak Hadir", v: stats.tidakHadir, color: "text-red-600 bg-red-50 border-red-100", icon: <UserX className="w-4 h-4" /> },
-                ].map(({ label, v, color, icon }) => (
-                  <div key={label} className="bg-card rounded-xl border border-border p-3 flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center border ${color}`}>{icon}</div>
-                    <div><p className="text-xl font-bold tabular-nums">{v}</p><p className="text-xs text-muted-foreground">{label}</p></div>
-                  </div>
-                ))}
-              </div>
-              <div className="relative">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari nama atau departemen…"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all" />
-              </div>
-              <div className="bg-card rounded-xl border border-border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-border bg-muted/30">
-                    {["Karyawan", "Check-In", "Check-Out", "Status", "Metode"].map(h => (
-                      <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
-                    ))}
-                  </tr></thead>
-                  <tbody className="divide-y divide-border">
-                    {filtered.map(rec => {
-                      const emp = EMPLOYEES.find(e => e.id === rec.employeeId);
-                      if (!emp) return null;
-                      return (
-                        <tr key={rec.id} className="hover:bg-muted/20 transition-colors">
-                          <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-2">
-                              <Avatar initials={emp.avatar} size="sm" />
-                              <div>
-                                <p className="font-semibold text-sm">{emp.name}</p>
-                                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${DEPT_COLORS[emp.department] ?? "bg-muted"} inline-block`}>{emp.department}</span>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-2.5"><span className={`font-mono text-sm ${rec.checkIn ? "font-semibold" : "text-muted-foreground"}`}>{rec.checkIn ?? "—"}</span></td>
-                          <td className="px-4 py-2.5"><span className={`font-mono text-sm ${rec.checkOut ? "font-semibold" : "text-muted-foreground"}`}>{rec.checkOut ?? "—"}</span></td>
-                          <td className="px-4 py-2.5"><StatusBadge status={rec.status} /></td>
-                          <td className="px-4 py-2.5"><MethodBadge method={rec.method} /></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-
-          {tab === "izin_cuti" && (
-            <div className="space-y-3">
-              {leaveRequests.map(req => {
-                const emp = EMPLOYEES.find(e => e.id === req.employeeId);
-                if (!emp) return null;
-                return (
-                  <div key={req.id} className="bg-card rounded-xl border border-border p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-start gap-3">
-                        <Avatar initials={emp.avatar} />
-                        <div>
-                          <p className="font-bold text-sm">{emp.name}</p>
-                          <p className="text-xs text-muted-foreground">{emp.position}</p>
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${req.type === "cuti" ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-blue-100 text-blue-700 border-blue-200"}`}>{req.type === "cuti" ? "Cuti" : "Izin"}</span>
-                            <span className="text-xs text-muted-foreground font-mono">{req.startDate === req.endDate ? req.startDate : `${req.startDate} – ${req.endDate}`}</span>
-                          </div>
-                          <p className="text-sm mt-1.5 italic text-muted-foreground">&ldquo;{req.reason}&rdquo;</p>
-                        </div>
-                      </div>
-                      <div className="flex-shrink-0">
-                        {req.status === "pending" ? (
-                          <div className="flex gap-2">
-                            <button onClick={() => approve(req.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold hover:bg-emerald-100 transition-colors"><Check className="w-3.5 h-3.5" />Setujui</button>
-                            <button onClick={() => reject(req.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-50 text-red-700 border border-red-200 text-xs font-semibold hover:bg-red-100 transition-colors"><X className="w-3.5 h-3.5" />Tolak</button>
-                          </div>
-                        ) : (
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${req.status === "approved" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-red-100 text-red-700 border-red-200"}`}>{req.status === "approved" ? "Disetujui" : "Ditolak"}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {tab === "karyawan" && (
-            <div className="grid grid-cols-2 gap-3">
-              {EMPLOYEES.map(emp => (
-                <div key={emp.id} className="bg-card rounded-xl border border-border p-4 flex items-center gap-3 hover:shadow-sm transition-shadow">
-                  <Avatar initials={emp.avatar} size="lg" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold">{emp.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{emp.position}</p>
-                    <div className="flex items-center gap-2 mt-1.5">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${DEPT_COLORS[emp.department] ?? "bg-muted"}`}>{emp.department}</span>
-                      <span className="text-[10px] font-mono text-muted-foreground">{emp.scheduleIn}–{emp.scheduleOut}</span>
-                    </div>
-                  </div>
-                  <p className="font-mono text-xs text-primary font-semibold flex-shrink-0">{emp.id}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Backend (REST API Zylora)
@@ -1882,8 +1466,6 @@ function TerminalControlDashboard({ attendance, leaveRequests, onApproveLeave, o
 // check-in/out & approve cuti — ditulis ke API lalu di-refresh.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const CONTROL_EMAIL = "kontrol@nusantara.co.id";
-const CONTROL_PASSWORD = "kontrol1234";
 const POLL_MS = 4000;
 
 const coversToday = (start: string, end: string, today: string) => start <= today && end >= today;
@@ -1904,7 +1486,7 @@ function useBackendData(enabled = true) {
 
   // Petakan data backend → bentuk yang dipakai komponen view. Mencakup SEMUA
   // karyawan: pakai record presensi bila ada, lalu cuti yang disetujui untuk hari
-  // ini, lalu default tidak_hadir — meniru INITIAL_ATTENDANCE prototipe.
+  // ini, lalu default tidak_hadir.
   const refresh = useCallback(async () => {
     const t = tokenRef.current;
     if (!t) return;
@@ -2128,41 +1710,18 @@ function QRDisplayPage() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function App() {
-  // 2-port mode (VITE_ROLE set) locks this server to one port; the selector below
-  // turns into a link to the other server. Single-port mode keeps the toggle.
-  const twoPort = APP_ROLE === "employee" || APP_ROLE === "control";
-  const fixedPort: "5173" | "5174" | null =
-    APP_ROLE === "control" ? "5174" : APP_ROLE === "employee" ? "5173" : null;
-
-  const [systemMode, setSystemMode] = useState<SystemMode>("qr_lokasi");
-  const [activePort, setActivePort] = useState<"5173" | "5174">("5173");
+  // Pengaturan pratinjau QR di panel kontrol.
   const [qrVariant, setQrVariant] = useState<QRVariant>("dynamic");
   const [qrInterval, setQrInterval] = useState(60);
 
-  // In 2-port mode the port comes from the server identity, not a tab click.
-  const effectivePort = fixedPort ?? activePort;
-  // Port app-karyawan (QR Lokasi :5173): auth sebagai karyawan, jadi hook admin
-  // dimatikan (tidak login admin di sini). Sisanya (dashboard, kiosk terminal)
-  // pakai token admin/perangkat tepercaya.
-  const isEmployeePhone = systemMode === "qr_lokasi" && effectivePort === "5173";
-  // App #3: halaman tampilan barcode (kiosk layar di lokasi) — publik, tanpa login.
-  const isDisplay = APP_ROLE === "display";
+  // Sumber kebenaran: backend Zylora (REST API). Data admin hanya diambil untuk
+  // peran 'control' (panel). Karyawan & display tak butuh hook admin.
+  const { attendance, leaveRequests, employees, locations, authed, token, login, logout,
+    approveLeave, rejectLeave, createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode,
+    createLocation, createLocationQr } = useBackendData(APP_ROLE === "control");
 
-  // Sumber kebenaran: backend Zylora (REST API). Menggantikan mock state + relay SSE.
-  // Hook admin nonaktif di app-karyawan & di halaman tampilan barcode.
-  const { attendance, leaveRequests, employees, locations, authed, token, login, logout, checkIn, checkOut, approveLeave, rejectLeave,
-    createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode, createLocation, createLocationQr } = useBackendData(!isEmployeePhone && !isDisplay);
-
-  const handleCheckIn = useCallback((empId: string) => {
-    checkIn(empId, systemMode === "qr_lokasi" ? "qr_lokasi" : "terminal");
-  }, [checkIn, systemMode]);
-
-  const handleCheckOut = useCallback((empId: string) => {
-    checkOut(empId);
-  }, [checkOut]);
-
-  // App #3: halaman tampilan barcode = layar mandiri (tanpa tab/selector).
-  if (isDisplay) return <QRDisplayPage />;
+  // Halaman tampilan QR lokasi (kiosk/layar) — publik, tanpa login.
+  if (APP_ROLE === "display") return <QRDisplayPage />;
 
   // Build per-role (VITE_ROLE) = deployment NYATA (APK/desktop): tampilkan langsung
   // app-nya tanpa "chrome" peraga prototipe (selektor Model Sistem + tab :5173/:5174,
@@ -2194,96 +1753,14 @@ export default function App() {
     </div>
   );
 
-  const MODE_CFG = {
-    qr_lokasi: {
-      label: "QR Ditempel / Ditampilkan di Lokasi",
-      desc: "Karyawan scan QR yang ada di lokasi menggunakan ponsel",
-      port5173: { label: "Aplikasi Ponsel Karyawan", icon: <Smartphone className="w-3.5 h-3.5" /> },
-      port5174: { label: "Sistem Kontrol + Tampilan QR Lokasi", icon: <Monitor className="w-3.5 h-3.5" /> },
-      color: "text-violet-600",
-      bg: "bg-violet-50 border-violet-200",
-      dot: "bg-violet-500",
-    },
-    terminal_scan: {
-      label: "Scanner / Terminal di Lokasi",
-      desc: "Terminal membaca QR unik dari ID card / ponsel karyawan",
-      port5173: { label: "Terminal Scanner (Kiosk)", icon: <Monitor className="w-3.5 h-3.5" /> },
-      port5174: { label: "Sistem Kontrol", icon: <Shield className="w-3.5 h-3.5" /> },
-      color: "text-sky-600",
-      bg: "bg-sky-50 border-sky-200",
-      dot: "bg-sky-500",
-    },
-  };
-
-  const cfg = MODE_CFG[systemMode];
-
+  // Tanpa VITE_ROLE → JANGAN tampilkan demo. Build nyata (APK/desktop/web) selalu
+  // menetapkan peran lewat VITE_ROLE; ini hanya pengaman bila dijalankan polos.
   return (
-    <div className="h-screen flex flex-col bg-background" style={{ fontFamily: "var(--font-sans)" }}>
-      {/* System Mode Selector */}
-      <div className="bg-foreground text-background flex-shrink-0 flex items-center gap-0 px-4 py-2 text-xs">
-        <span className="text-background/40 mr-3 flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-accent" />Model Sistem Absensi:</span>
-        {(["qr_lokasi", "terminal_scan"] as SystemMode[]).map(m => (
-          <button key={m} onClick={() => setSystemMode(m)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md mr-1.5 font-semibold transition-all ${systemMode === m ? "bg-white/15 text-white" : "text-background/40 hover:bg-white/8 hover:text-background/70"}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${MODE_CFG[m].dot}`} />
-            {MODE_CFG[m].label}
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-1.5 text-background/30">
-          <Wifi className="w-3 h-3 text-accent" />Dua port aktif dan tersinkronisasi
-        </div>
-      </div>
-
-      {/* Port Tabs */}
-      <div className="bg-card border-b border-border flex-shrink-0 flex items-center">
-        {(["5173", "5174"] as const).map(port => {
-          const info = port === "5173" ? cfg.port5173 : cfg.port5174;
-          const isActive = effectivePort === port;
-          return (
-            <button key={port}
-              title={twoPort && !isActive ? `Buka server :${port} di tab ini` : undefined}
-              onClick={() => {
-                if (twoPort) {
-                  if (!isActive) window.location.href = `http://${window.location.hostname}:${port}/`;
-                } else {
-                  setActivePort(port);
-                }
-              }}
-              className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold border-b-2 transition-all ${isActive ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-              {info.icon}{info.label}
-              <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${isActive ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>:{port}</span>
-              {twoPort && !isActive && <ChevronRight className="w-3.5 h-3.5 opacity-60" />}
-            </button>
-          );
-        })}
-        <div className="flex-1 flex items-center justify-end px-5">
-          <span className={`text-[11px] px-2.5 py-1 rounded-full border font-semibold ${cfg.bg} ${cfg.color}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} inline-block mr-1.5 animate-pulse`} />
-            {systemMode === "qr_lokasi" ? "QR Lokasi" : "Terminal Scan"} — Data real-time tersinkronisasi
-          </span>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-hidden">
-        {systemMode === "qr_lokasi" ? (
-          effectivePort === "5173" ? (
-            <QRLokasiEmployeeApp />
-          ) : (
-            <QRLokasiControlPanel attendance={attendance} leaveRequests={leaveRequests} onApproveLeave={approveLeave} onRejectLeave={rejectLeave}
-              employees={employees} onCreateEmployee={createEmployee} onUpdateEmployee={updateEmployee}
-              onDeleteEmployee={deleteEmployee} onResetCode={resetEmployeeCode}
-              authed={authed} onLogin={login} onLogout={logout} token={token}
-              locations={locations} onCreateLocation={createLocation} onCreateLocationQr={createLocationQr}
-              qrVariant={qrVariant} setQrVariant={setQrVariant} qrInterval={qrInterval} setQrInterval={setQrInterval} />
-          )
-        ) : (
-          effectivePort === "5173" ? (
-            <TerminalScanKiosk attendance={attendance} onCheckIn={handleCheckIn} onCheckOut={handleCheckOut} />
-          ) : (
-            <TerminalControlDashboard attendance={attendance} leaveRequests={leaveRequests} onApproveLeave={approveLeave} onRejectLeave={rejectLeave} />
-          )
-        )}
+    <div className="h-screen flex items-center justify-center bg-[#0D1B2A] p-6 text-center" style={{ fontFamily: "var(--font-sans)" }}>
+      <div className="max-w-md">
+        <div className="w-14 h-14 rounded-2xl bg-[#1B3D72] flex items-center justify-center mx-auto mb-4"><Activity className="w-7 h-7 text-accent" /></div>
+        <h2 className="text-white font-bold text-lg mb-2">Zylora Absensi</h2>
+        <p className="text-white/60 text-sm">Build ini tidak menetapkan peran. Jalankan dengan <code className="text-accent">VITE_ROLE=employee | control | display</code> (lihat skrip dev:employee / dev:control / dev:display).</p>
       </div>
     </div>
   );

@@ -2,12 +2,12 @@
 // Klien REST untuk backend Zylora (server/api). Menggantikan mock state + relay
 // SSE: backend kini jadi sumber kebenaran, frontend membaca/menulis lewat sini.
 //
-// Base URL default ke 127.0.0.2:5181 (host bind backend) agar tetap benar baik
-// saat frontend dilayani dari 127.0.0.2 (dev:2port) maupun localhost (dev biasa).
-// Override via VITE_API_URL bila perlu.
+// Base URL diambil dari VITE_API_URL (di-bake saat build APK/web/desktop). Bila
+// kosong, default ke backend PRODUKSI di EC2 — JANGAN diam-diam ke localhost,
+// karena itu membuat build seakan "offline". Untuk dev lokal, set VITE_API_URL.
 // ─────────────────────────────────────────────────────────────────────────────
 const BASE =
-  (import.meta as any).env?.VITE_API_URL || "http://127.0.0.2:5181";
+  (import.meta as any).env?.VITE_API_URL || "https://api.13-218-74-178.sslip.io";
 
 export type ApiAttendanceRow = {
   employeeId: string; name: string; department: string;
