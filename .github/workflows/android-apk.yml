@@ -57,6 +57,8 @@ jobs:
           npm install --no-audit --no-fund
           npx cap add android || true
           npx cap sync android
+          # Izin kamera + lokasi (scan QR & GPS butuh ini di WebView).
+          node inject-permissions.mjs
 
       - name: Bump app version (tiap APK = update, bukan reinstall yang ditolak)
         working-directory: android-app/android

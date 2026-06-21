@@ -9,6 +9,7 @@ import {
   AlertTriangle, Eye, RotateCcw, Camera, Zap
 } from "lucide-react";
 import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiPublicLocation, type ApiEmployee, type EmployeeInput } from "./api";
+import { Html5Qrcode } from "html5-qrcode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -213,6 +214,57 @@ function MethodBadge({ method }: { method: AttendanceRecord["method"] }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // App karyawan — MANDIRI: login sebagai karyawan (JWT peran 'employee'), bukan
+// GPS perangkat sungguhan (untuk validasi radius di backend). Menolak bila izin
+// lokasi ditolak / GPS mati.
+function getDeviceGps(): Promise<{ lat: number; lng: number }> {
+  return new Promise((resolve, reject) => {
+    if (!("geolocation" in navigator)) { reject(new Error("Perangkat tidak mendukung GPS")); return; }
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      (e) => reject(new Error(e.code === 1 ? "Izin lokasi ditolak — aktifkan GPS untuk absen" : "Gagal membaca GPS")),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+    );
+  });
+}
+
+// Scanner QR kamera SUNGGUHAN (html5-qrcode + getUserMedia). Responsif: qrbox
+// menyesuaikan ukuran layar (HP & tablet). Memanggil onDecoded dengan isi QR
+// (token lokasi) lalu berhenti.
+function QrScanner({ onDecoded, onError }: { onDecoded: (text: string) => void; onError: (msg: string) => void }) {
+  const holderId = "zylora-qr-reader";
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const doneRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    const h = new Html5Qrcode(holderId, { verbose: false } as any);
+    scannerRef.current = h;
+    h.start(
+      { facingMode: "environment" },
+      {
+        fps: 10,
+        qrbox: (vw: number, vh: number) => { const s = Math.floor(Math.min(vw, vh) * 0.7); return { width: s, height: s }; },
+      },
+      (decoded: string) => {
+        if (doneRef.current) return;
+        doneRef.current = true;
+        h.stop().catch(() => {}).finally(() => { if (!cancelled) onDecoded(decoded); });
+      },
+      () => { /* gagal decode per-frame: abaikan */ },
+    ).catch((e: any) => {
+      onError(e?.message?.includes("Permission") || e?.name === "NotAllowedError"
+        ? "Izin kamera ditolak — aktifkan kamera untuk memindai QR"
+        : (e?.message || "Kamera tidak bisa dibuka"));
+    });
+    return () => {
+      cancelled = true;
+      const s = scannerRef.current;
+      if (s) { try { s.stop().then(() => s.clear()).catch(() => {}); } catch { /* noop */ } }
+    };
+  }, [onDecoded, onError]);
+  return <div id={holderId} className="w-full h-full [&_video]:w-full [&_video]:h-full [&_video]:object-cover" />;
+}
+
+// App karyawan — MANDIRI: login sebagai karyawan (JWT peran 'employee'), bukan
 // admin. Status & check-in lewat /api/me/*; identitas dari token (tak kirim kode).
 function QRLokasiEmployeeApp() {
   const [token, setToken] = useState<string | null>(null);
@@ -224,13 +276,14 @@ function QRLokasiEmployeeApp() {
   const [scanning, setScanning] = useState(false);
   const [scanDone, setScanDone] = useState(false);
   const [scanErr, setScanErr] = useState("");
+  const [scanFor, setScanFor] = useState<null | "in" | "out">(null);
+  const scanForRef = useRef<null | "in" | "out">(null);
   const [locName, setLocName] = useState("Lokasi Kantor");
   const now = useClock();
 
   const loggedIn = !!token && !!me;
   const checkedIn = !!me?.today?.check_in;
   const checkedOut = !!me?.today?.check_out;
-  const gpsOk = true;
 
   // Bentuk objek 'employee' yang dipakai JSX (avatar = inisial nama).
   const employee = me ? {
@@ -259,24 +312,31 @@ function QRLokasiEmployeeApp() {
     setToken(null); setMe(null); setLoginId(""); setLoginPin("");
   };
 
-  const doScan = (action: "in" | "out") => {
-    if (!token) return;
-    setScanning(true); setScanErr("");
-    setTimeout(async () => {
-      try {
-        const loc = await api.publicLocation();
-        if (action === "in") await api.meCheckin(token, { location_token: loc.token, lat: loc.lat, lng: loc.lng });
-        else await api.meCheckout(token, { location_token: loc.token });
-        setMe(await api.me(token));
-        setScanDone(true);
-        setTimeout(() => setScanDone(false), 2500);
-      } catch (e: any) {
-        setScanErr(e?.message || "Gagal memindai");
-      } finally {
-        setScanning(false);
-      }
-    }, 2000);
-  };
+  // Buka kamera untuk memindai QR lokasi (action disimpan di ref agar callback
+  // scanner stabil & kamera tak restart tiap render).
+  const openScan = (action: "in" | "out") => { scanForRef.current = action; setScanErr(""); setScanFor(action); };
+  const cancelScan = () => { setScanFor(null); };
+
+  // Dipanggil saat QR berhasil dibaca: ambil GPS asli lalu kirim ke backend.
+  const handleDecoded = useCallback(async (scannedToken: string) => {
+    const action = scanForRef.current;
+    if (!token || !action) return;
+    setScanFor(null); setScanning(true); setScanErr("");
+    try {
+      const gps = await getDeviceGps();
+      if (action === "in") await api.meCheckin(token, { location_token: scannedToken, lat: gps.lat, lng: gps.lng });
+      else await api.meCheckout(token, { location_token: scannedToken, lat: gps.lat, lng: gps.lng });
+      setMe(await api.me(token));
+      setScanDone(true);
+      setTimeout(() => setScanDone(false), 2500);
+    } catch (e: any) {
+      setScanErr(e?.message || "Gagal absen");
+    } finally {
+      setScanning(false);
+    }
+  }, [token]);
+
+  const handleScanErr = useCallback((msg: string) => { setScanFor(null); setScanErr(msg); }, []);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -324,7 +384,7 @@ function QRLokasiEmployeeApp() {
             </motion.div>
           </div>
         ) : employee ? (
-          <div className="space-y-4">
+          <div className="space-y-4 max-w-md md:max-w-lg mx-auto w-full">
             {/* User bar */}
             <div className="bg-card rounded-xl border border-border px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -359,41 +419,44 @@ function QRLokasiEmployeeApp() {
               <p className="text-sm font-semibold mb-1">Pindai QR di Lokasi Absen</p>
               <p className="text-xs text-muted-foreground mb-4">Arahkan kamera ponsel ke QR Code yang ditampilkan di layar / ditempel di area pintu masuk.</p>
 
-              {/* Viewfinder */}
-              <div className="relative w-full max-w-[220px] mx-auto aspect-square bg-foreground/5 rounded-2xl border-2 border-dashed border-border overflow-hidden flex items-center justify-center mb-4">
+              {/* Viewfinder — kamera SUNGGUHAN saat memindai (responsif HP & tablet) */}
+              <div className="relative w-full max-w-[240px] sm:max-w-[320px] md:max-w-[380px] mx-auto aspect-square bg-foreground/5 rounded-2xl border-2 border-dashed border-border overflow-hidden flex items-center justify-center mb-3">
                 {scanDone ? (
                   <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
                     className="flex flex-col items-center gap-2">
                     <CheckCircle2 className="w-16 h-16 text-accent" />
                     <p className="text-sm font-bold text-accent">{checkedIn && !checkedOut ? "Check-Out Berhasil" : "Check-In Berhasil"}</p>
                   </motion.div>
+                ) : scanFor ? (
+                  <QrScanner onDecoded={handleDecoded} onError={handleScanErr} />
                 ) : scanning ? (
-                  <>
-                    <Camera className="w-10 h-10 text-primary/20" />
-                    <motion.div className="absolute left-4 right-4 h-0.5 bg-gradient-to-r from-transparent via-primary to-transparent"
-                      animate={{ y: [-70, 70, -70] }}
-                      transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }} />
-                    <div className="absolute inset-0 bg-primary/5" />
-                    <p className="absolute bottom-3 text-xs text-primary font-semibold">Memindai…</p>
-                  </>
+                  <div className="flex flex-col items-center gap-2 text-primary">
+                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
+                      <Camera className="w-10 h-10" />
+                    </motion.div>
+                    <p className="text-xs font-semibold">Memproses & cek GPS…</p>
+                  </div>
                 ) : (
                   <div className="flex flex-col items-center gap-2 text-muted-foreground">
                     <Camera className="w-10 h-10 opacity-30" />
-                    <p className="text-xs text-center opacity-60">Klik tombol untuk<br/>mengaktifkan kamera</p>
+                    <p className="text-xs text-center opacity-60">Tekan tombol di bawah untuk<br/>membuka kamera &amp; pindai QR</p>
                   </div>
                 )}
 
-                {/* Corner marks */}
-                {["top-2 left-2", "top-2 right-2", "bottom-2 left-2", "bottom-2 right-2"].map((p, i) => (
+                {/* Corner marks (disembunyikan saat kamera live) */}
+                {!scanFor && ["top-2 left-2", "top-2 right-2", "bottom-2 left-2", "bottom-2 right-2"].map((p, i) => (
                   <div key={i} className={`absolute ${p} w-5 h-5 border-primary/50 border-2 ${i===0?"rounded-tl border-r-0 border-b-0":i===1?"rounded-tr border-l-0 border-b-0":i===2?"rounded-bl border-r-0 border-t-0":"rounded-br border-l-0 border-t-0"}`} />
                 ))}
               </div>
 
-              {/* GPS */}
-              <div className={`flex items-center justify-center gap-2 text-xs font-semibold mb-4 ${gpsOk ? "text-emerald-600" : "text-red-500"}`}>
-                <MapPin className="w-3.5 h-3.5" />
-                {gpsOk ? `GPS: ${locName} ✓` : "GPS: Lokasi tidak dikenali"}
-                <span className={`w-1.5 h-1.5 rounded-full ${gpsOk ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`} />
+              {scanFor && (
+                <button onClick={cancelScan} className="w-full mb-3 py-2 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/40">Batal</button>
+              )}
+
+              {/* GPS — koordinat HP diperiksa saat absen (validasi radius di server) */}
+              <div className="flex items-center justify-center gap-2 text-xs font-semibold mb-4 text-muted-foreground text-center">
+                <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Lokasi: {locName} · GPS HP diperiksa saat memindai</span>
               </div>
 
               {scanErr && (
@@ -403,14 +466,14 @@ function QRLokasiEmployeeApp() {
               )}
 
               {/* Buttons */}
-              {!checkedIn && !checkedOut && (
-                <button onClick={() => doScan("in")} disabled={scanning || !gpsOk}
+              {!scanFor && !checkedIn && !checkedOut && (
+                <button onClick={() => openScan("in")} disabled={scanning}
                   className="w-full py-3 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
                   <Camera className="w-4 h-4" />Pindai untuk Check-In
                 </button>
               )}
-              {checkedIn && !checkedOut && (
-                <button onClick={() => doScan("out")} disabled={scanning || !gpsOk}
+              {!scanFor && checkedIn && !checkedOut && (
+                <button onClick={() => openScan("out")} disabled={scanning}
                   className="w-full py-3 rounded-xl bg-foreground text-background font-semibold text-sm hover:bg-foreground/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
                   <LogOut className="w-4 h-4" />Pindai untuk Check-Out
                 </button>

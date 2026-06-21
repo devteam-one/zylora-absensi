@@ -110,7 +110,7 @@ export const api = {
   me: (token: string) => req<ApiMe>("/api/me", { token }),
   meCheckin: (token: string, body: { location_token: string; lat?: number | null; lng?: number | null; method?: string }) =>
     req<{ check_in: string; status: string; location: string }>("/api/me/checkin", { method: "POST", token, body }),
-  meCheckout: (token: string, body: { location_token: string }) =>
+  meCheckout: (token: string, body: { location_token: string; lat?: number | null; lng?: number | null }) =>
     req<{ check_out: string }>("/api/me/checkout", { method: "POST", token, body }),
 
   // Publik (kiosk / app karyawan)

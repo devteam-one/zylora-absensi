@@ -26,9 +26,14 @@ router.get("/health", (ctx) => json(ctx.res, 200, { ok: true, service: "zylora-a
 
 registerAll(router);
 
-const seeded = seedIfEmpty();
+// Seed demo HANYA bila ZYLORA_SEED=1 (default OFF). Produksi mulai BERSIH —
+// daftarkan perusahaan/admin asli via POST /api/control/register lalu tambah
+// karyawan & lokasi lewat Panel Kontrol. ZYLORA_SEED=1 dipakai dev/lokal saja.
+const seeded = process.env.ZYLORA_SEED === "1" ? seedIfEmpty() : null;
 if (seeded) {
   console.log(`[zylora] seeded demo data → sistem kontrol: ${seeded.controlEmail} / ${seeded.controlPassword} · karyawan: EMP001–EMP008 / PIN ${seeded.employeePin}`);
+} else if (process.env.ZYLORA_SEED !== "1") {
+  console.log("[zylora] seed demo dimatikan (set ZYLORA_SEED=1 untuk data demo).");
 }
 
 const server = http.createServer((req, res) => {
