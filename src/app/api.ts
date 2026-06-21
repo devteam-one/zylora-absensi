@@ -122,6 +122,46 @@ export const api = {
   createDynamicCode: (token: string, locationId: string, interval: "hourly" | "daily" = "hourly") =>
     req<{ codeId: string; type: string; interval: string; qrImageUrl: string }>(
       `/api/locations/${locationId}/codes/dynamic`, { method: "POST", token, body: { interval } }),
+  createStaticCode: (token: string, locationId: string) =>
+    req<{ codeId: string; qrImageUrl: string }>(
+      `/api/locations/${locationId}/codes`, { method: "POST", token, body: {} }),
+  refreshCode: (token: string, locationId: string, codeId: string) =>
+    req<{ newCode: string; qrImageUrl: string; expires_at: string }>(
+      `/api/locations/${locationId}/codes/${codeId}/refresh`, { method: "POST", token }),
+  updateCode: (token: string, locationId: string, codeId: string, body: { status?: "active" | "inactive"; interval?: string }) =>
+    req(`/api/locations/${locationId}/codes/${codeId}`, { method: "PUT", token, body }),
+
+  // Shift kerja
+  shifts: (token: string) => req<Array<{ shiftId: string; name: string; start: string; end: string }>>("/api/shifts", { token }),
+  createShift: (token: string, body: { name: string; start: string; end: string }) =>
+    req<{ shiftId: string }>("/api/shifts", { method: "POST", token, body }),
+  updateShift: (token: string, id: string, body: { name?: string; start?: string; end?: string }) =>
+    req(`/api/shifts/${id}`, { method: "PUT", token, body }),
+
+  // Perangkat terdaftar
+  devices: (token: string) => req<Array<{ id: string; employeeId: string; deviceId: string; label: string | null; created_at: string }>>("/api/devices", { token }),
+  createDevice: (token: string, body: { employeeId: string; deviceId: string; label?: string }) =>
+    req<{ id: string }>("/api/devices", { method: "POST", token, body }),
+
+  // Profil & pengaturan perusahaan
+  company: (token: string) => req<{ companyId: string; name: string; address: string | null; contact_email: string | null; industry: string | null; logo_url: string | null; work_hours: { start: string; end: string } }>("/api/company", { token }),
+  updateCompany: (token: string, body: Record<string, unknown>) =>
+    req("/api/company", { method: "PUT", token, body }),
+  companySettings: (token: string) => req<{ timezone: string; attendance_mode: string; language: string }>("/api/company/settings", { token }),
+  updateCompanySettings: (token: string, body: { timezone?: string; attendance_mode?: string; language?: string }) =>
+    req("/api/company/settings", { method: "PUT", token, body }),
+  setLogo: (token: string, logo_url: string) =>
+    req("/api/company/logo", { method: "POST", token, body: { logo_url } }),
+  registerCompany: (token: string, body: { company_name: string; address?: string; contact_email?: string; industry?: string }) =>
+    req<{ companyId: string }>("/api/company/register", { method: "POST", token, body }),
+
+  // Riwayat presensi per karyawan
+  employeeAttendance: (token: string, id: string, q?: { start?: string; end?: string }) =>
+    req<Array<{ date: string; check_in: string | null; check_out: string | null; status: string; method: string | null }>>(
+      `/api/employees/${id}/attendance${q && (q.start || q.end) ? `?${new URLSearchParams(q as Record<string, string>)}` : ""}`, { token }),
+
+  // Log audit admin
+  logs: (token: string) => req<Array<{ id: string; admin_id: string | null; action: string; detail: string | null; ip: string | null; created_at: string }>>("/api/logs", { token }),
 
   // Auth & self-service KARYAWAN (token peran 'employee', terpisah dari admin)
   employeeLogin: (employeeId: string, password: string) =>
