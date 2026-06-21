@@ -8,7 +8,7 @@ import {
   Smartphone, Monitor, ArrowRight, ChevronRight,
   AlertTriangle, Eye, RotateCcw, Camera, Zap
 } from "lucide-react";
-import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiPublicLocation, type ApiEmployee, type EmployeeInput } from "./api";
+import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiPublicLocation, type ApiEmployee, type EmployeeInput, type ApiLocation, type LocationInput } from "./api";
 import { Html5Qrcode } from "html5-qrcode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -491,7 +491,50 @@ function QRLokasiEmployeeApp() {
   );
 }
 
-function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRejectLeave, employees, onCreateEmployee, onUpdateEmployee, onDeleteEmployee, onResetCode, qrVariant, setQrVariant, qrInterval, setQrInterval }: {
+// Login admin Sistem Kontrol (mengganti auto-login demo). Bisa juga daftar
+// perusahaan+admin baru (POST /api/control/register) untuk setup awal.
+function ControlLogin({ onLogin }: { onLogin: (email: string, password: string) => Promise<void> }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [company, setCompany] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    if (!email.trim() || !password) { setErr("Email & password wajib"); return; }
+    if (mode === "register" && (!name.trim() || !company.trim())) { setErr("Nama admin & perusahaan wajib"); return; }
+    if (mode === "register" && password.length < 8) { setErr("Password minimal 8 karakter"); return; }
+    setBusy(true); setErr("");
+    try {
+      if (mode === "register") await api.controlRegister({ name: name.trim(), email: email.trim(), password, company_name: company.trim() });
+      await onLogin(email, password);
+    } catch (e: any) { setErr(e?.message || "Gagal masuk"); setBusy(false); }
+  };
+  const inputCls = "w-full px-3 py-2 rounded-lg border border-border text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30";
+  return (
+    <div className="h-screen flex items-center justify-center bg-[#0D1B2A] p-4" style={{ fontFamily: "var(--font-sans)" }}>
+      <div className="bg-card rounded-2xl border border-border p-7 w-full max-w-sm shadow-lg">
+        <div className="w-12 h-12 rounded-xl bg-[#1B3D72] flex items-center justify-center mb-5"><Shield className="w-6 h-6 text-white" /></div>
+        <h2 className="font-bold text-lg mb-1">{mode === "login" ? "Masuk Sistem Kontrol" : "Daftar Perusahaan"}</h2>
+        <p className="text-sm text-muted-foreground mb-5">{mode === "login" ? "Login admin untuk mengelola absensi." : "Buat akun admin + perusahaan baru."}</p>
+        {err && <div className="flex items-center gap-2 p-2.5 mb-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{err}</div>}
+        {mode === "register" && <>
+          <input className={inputCls} placeholder="Nama admin" value={name} onChange={e => setName(e.target.value)} />
+          <input className={inputCls} placeholder="Nama perusahaan (PT ...)" value={company} onChange={e => setCompany(e.target.value)} />
+        </>}
+        <input className={inputCls} type="email" placeholder="Email admin" value={email} onChange={e => setEmail(e.target.value)} />
+        <input className={inputCls} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
+        <button disabled={busy} onClick={submit} className="w-full mt-1 py-3 rounded-xl bg-[#1B3D72] text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50">{busy ? "Memproses…" : mode === "login" ? "Masuk" : "Daftar & Masuk"}</button>
+        <button onClick={() => { setMode(mode === "login" ? "register" : "login"); setErr(""); }} className="w-full mt-3 text-xs text-muted-foreground hover:text-foreground">
+          {mode === "login" ? "Belum punya akun? Daftar perusahaan baru" : "Sudah punya akun? Masuk"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRejectLeave, employees, onCreateEmployee, onUpdateEmployee, onDeleteEmployee, onResetCode, authed, onLogin, onLogout, qrVariant, setQrVariant, qrInterval, setQrInterval }: {
   attendance: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
   onApproveLeave: (id: string) => void;
@@ -501,12 +544,24 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
   onUpdateEmployee: (id: string, b: EmployeeInput) => Promise<void>;
   onDeleteEmployee: (id: string, soft?: boolean) => Promise<void>;
   onResetCode: (id: string) => Promise<void>;
+  authed: boolean;
+  onLogin: (email: string, password: string) => Promise<void>;
+  onLogout: () => void;
+  locations: ApiLocation[];
+  onCreateLocation: (b: LocationInput) => Promise<void>;
+  onCreateLocationQr: (locationId: string, interval?: "hourly" | "daily") => Promise<{ qrImageUrl: string }>;
   qrVariant: QRVariant; setQrVariant: (v: QRVariant) => void;
   qrInterval: number; setQrInterval: (n: number) => void;
 }) {
   const now = useClock();
+  const empName = useCallback((id: string) => employees.find(e => e.employeeId === id), [employees]);
+  const initials = (name: string) => name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
   const { timeLeft, qrUrl, staticUrl } = useDynamicQR(qrInterval);
-  const [tab, setTab] = useState<"qr_display" | "kehadiran" | "izin_cuti" | "karyawan">("qr_display");
+  const [tab, setTab] = useState<"qr_display" | "kehadiran" | "izin_cuti" | "karyawan" | "lokasi">("qr_display");
+
+  // Belum login → layar login admin (ganti auto-login demo). Setelah semua hooks
+  // agar tidak melanggar rules-of-hooks.
+  if (!authed) return <ControlLogin onLogin={onLogin} />;
 
   const stats = {
     hadir: attendance.filter(a => a.status === "hadir").length,
@@ -541,6 +596,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
             { key: "kehadiran",  label: "Kehadiran",   icon: <Activity className="w-4 h-4" /> },
             { key: "izin_cuti",  label: "Izin & Cuti", icon: <FileText className="w-4 h-4" />, badge: leaveRequests.filter(l => l.status === "pending").length },
             { key: "karyawan",   label: "Karyawan",    icon: <UserCheck className="w-4 h-4" />, badge: employees.length },
+            { key: "lokasi",     label: "Lokasi & QR", icon: <MapPin className="w-4 h-4" />, badge: locations.length },
           ].map(({ key, label, icon, badge }: any) => (
             <button key={key} onClick={() => setTab(key)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${tab === key ? "bg-white/20 text-white" : "text-white/60 hover:bg-white/10 hover:text-white"}`}>
@@ -553,7 +609,10 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
           <div className="flex items-center gap-1.5 text-[11px] text-white/50">
             <Wifi className="w-3 h-3 text-accent" />Tersinkronisasi
           </div>
-          <p className="font-mono text-white/70 text-xs mt-0.5 tabular-nums">{fmtTime(now)}</p>
+          <p className="font-mono text-white/70 text-xs mt-0.5 mb-2 tabular-nums">{fmtTime(now)}</p>
+          <button onClick={onLogout} className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white/70 bg-white/10 hover:bg-white/20 transition-colors">
+            <LogOut className="w-3.5 h-3.5" />Keluar
+          </button>
         </div>
       </div>
 
@@ -562,7 +621,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
         <div className="bg-card border-b border-border px-5 py-3 flex items-center justify-between flex-shrink-0">
           <div>
             <h1 className="font-bold text-sm">
-              {tab === "qr_display" ? "QR Code Lokasi Absensi" : tab === "kehadiran" ? "Rekap Kehadiran" : tab === "izin_cuti" ? "Manajemen Izin & Cuti" : "Kelola Karyawan"}
+              {tab === "qr_display" ? "QR Code Lokasi Absensi" : tab === "kehadiran" ? "Rekap Kehadiran" : tab === "izin_cuti" ? "Manajemen Izin & Cuti" : tab === "karyawan" ? "Kelola Karyawan" : "Lokasi & QR"}
             </h1>
             <p className="text-xs text-muted-foreground">{fmtDate(now)}</p>
           </div>
@@ -699,16 +758,17 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
                   </tr></thead>
                   <tbody className="divide-y divide-border">
                     {attendance.map(rec => {
-                      const emp = EMPLOYEES.find(e => e.id === rec.employeeId);
-                      if (!emp) return null;
+                      const emp = empName(rec.employeeId);
+                      const nm = emp?.name ?? rec.employeeId;
+                      const dept = emp?.department ?? "—";
                       return (
                         <tr key={rec.id} className="hover:bg-muted/20 transition-colors">
                           <td className="px-4 py-2.5">
                             <div className="flex items-center gap-2">
-                              <Avatar initials={emp.avatar} size="sm" />
+                              <Avatar initials={initials(nm)} size="sm" />
                               <div>
-                                <p className="font-semibold text-sm">{emp.name}</p>
-                                <p className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${DEPT_COLORS[emp.department] ?? "bg-muted text-foreground"} inline-block`}>{emp.department}</p>
+                                <p className="font-semibold text-sm">{nm}</p>
+                                <p className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${DEPT_COLORS[dept] ?? "bg-muted text-foreground"} inline-block`}>{dept}</p>
                               </div>
                             </div>
                           </td>
@@ -728,17 +788,20 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
           {/* Leave Tab */}
           {tab === "izin_cuti" && (
             <div className="space-y-3">
+              {leaveRequests.length === 0 && (
+                <p className="text-center text-muted-foreground text-sm py-8">Belum ada pengajuan izin/cuti.</p>
+              )}
               {leaveRequests.map(req => {
-                const emp = EMPLOYEES.find(e => e.id === req.employeeId);
-                if (!emp) return null;
+                const emp = empName(req.employeeId);
+                const nm = emp?.name ?? req.employeeId;
                 return (
                   <div key={req.id} className="bg-card rounded-xl border border-border p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex items-start gap-3">
-                        <Avatar initials={emp.avatar} />
+                        <Avatar initials={initials(nm)} />
                         <div>
-                          <p className="font-bold text-sm">{emp.name}</p>
-                          <p className="text-xs text-muted-foreground">{emp.position}</p>
+                          <p className="font-bold text-sm">{nm}</p>
+                          <p className="text-xs text-muted-foreground">{emp?.position ?? "—"}</p>
                           <div className="flex items-center gap-2 mt-1.5">
                             <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${req.type === "cuti" ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-blue-100 text-blue-700 border-blue-200"}`}>{req.type === "cuti" ? "Cuti" : "Izin"}</span>
                             <span className="text-xs text-muted-foreground font-mono">{req.startDate === req.endDate ? req.startDate : `${req.startDate} – ${req.endDate}`}</span>
@@ -767,6 +830,11 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
           {tab === "karyawan" && (
             <EmployeeManagerTab employees={employees} onCreate={onCreateEmployee}
               onUpdate={onUpdateEmployee} onDelete={onDeleteEmployee} onResetCode={onResetCode} />
+          )}
+
+          {/* Lokasi Tab */}
+          {tab === "lokasi" && (
+            <LokasiTab locations={locations} onCreate={onCreateLocation} onCreateQr={onCreateLocationQr} />
           )}
         </div>
       </div>
@@ -908,6 +976,94 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// Modul Lokasi & QR (admin): daftar + tambah lokasi (koordinat GPS asli) + buat
+// QR dinamis. "Pakai lokasi saya" mengisi koordinat dari GPS perangkat admin.
+function LokasiTab({ locations, onCreate, onCreateQr }: {
+  locations: ApiLocation[];
+  onCreate: (b: LocationInput) => Promise<void>;
+  onCreateQr: (locationId: string, interval?: "hourly" | "daily") => Promise<{ qrImageUrl: string }>;
+}) {
+  const EMPTY: LocationInput = { name: "", address: "", type: "office", lat: null, lng: null, radius_m: 100 };
+  const [mode, setMode] = useState<"list" | "form">("list");
+  const [form, setForm] = useState<LocationInput>(EMPTY);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [qr, setQr] = useState<{ loc: string; url: string } | null>(null);
+  const inputCls = "w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
+
+  const useMyGps = async () => {
+    setErr("");
+    try { const g = await getDeviceGps(); setForm(f => ({ ...f, lat: g.lat, lng: g.lng })); }
+    catch (e: any) { setErr(e?.message || "Gagal ambil GPS"); }
+  };
+  const save = async () => {
+    if (!form.name?.trim()) { setErr("Nama lokasi wajib"); return; }
+    setBusy(true); setErr("");
+    try { await onCreate({ ...form, radius_m: Number(form.radius_m) || 100 }); setMode("list"); }
+    catch (e: any) { setErr(e?.message || "Gagal menyimpan"); }
+    finally { setBusy(false); }
+  };
+  const genQr = async (locId: string) => {
+    setBusy(true); setErr("");
+    try { const r = await onCreateQr(locId, "hourly"); setQr({ loc: locId, url: r.qrImageUrl }); }
+    catch (e: any) { setErr(e?.message || "Gagal membuat QR"); }
+    finally { setBusy(false); }
+  };
+
+  if (mode === "form") return (
+    <div className="bg-card rounded-xl border border-border p-5 max-w-xl space-y-3">
+      <p className="font-semibold text-sm">Tambah Lokasi Absensi</p>
+      {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Nama Lokasi</label><input className={inputCls} placeholder="mis. Kantor Pusat" value={form.name ?? ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Alamat</label><input className={inputCls} placeholder="Alamat lokasi" value={form.address ?? ""} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Latitude</label><input className={inputCls} type="number" step="any" placeholder="-6.2088" value={form.lat ?? ""} onChange={e => setForm(f => ({ ...f, lat: e.target.value === "" ? null : Number(e.target.value) }))} /></div>
+        <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Longitude</label><input className={inputCls} type="number" step="any" placeholder="106.8456" value={form.lng ?? ""} onChange={e => setForm(f => ({ ...f, lng: e.target.value === "" ? null : Number(e.target.value) }))} /></div>
+      </div>
+      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Radius validasi (meter)</label><input className={inputCls} type="number" placeholder="100" value={form.radius_m ?? 100} onChange={e => setForm(f => ({ ...f, radius_m: Number(e.target.value) }))} /></div>
+      <button onClick={useMyGps} className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"><MapPin className="w-3.5 h-3.5" />Pakai koordinat GPS saya sekarang</button>
+      <div className="flex gap-2 pt-1">
+        <button disabled={busy} onClick={save} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"><Check className="w-4 h-4" />{busy ? "Menyimpan…" : "Simpan"}</button>
+        <button disabled={busy} onClick={() => setMode("list")} className="px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40">Batal</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{locations.length} lokasi terdaftar</p>
+        <button onClick={() => { setForm(EMPTY); setErr(""); setMode("form"); }} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"><MapPin className="w-4 h-4" />Tambah Lokasi</button>
+      </div>
+      {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      {locations.length === 0 && <p className="text-center text-muted-foreground text-sm py-8">Belum ada lokasi. Tambah kantor + koordinat GPS-nya agar validasi radius berfungsi.</p>}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {locations.map(l => (
+          <div key={l.locationId} className="bg-card rounded-xl border border-border p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="font-bold text-sm">{l.name}</p>
+                <p className="text-xs text-muted-foreground">{l.address || "—"}</p>
+                <p className="text-[11px] font-mono text-muted-foreground mt-1">{l.lat != null && l.lng != null ? `${l.lat}, ${l.lng}` : "GPS belum diset"} · radius {l.radius_m}m</p>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">{l.type}</span>
+            </div>
+            <div className="mt-3">
+              <button disabled={busy} onClick={() => genQr(l.locationId)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 disabled:opacity-50"><QrCode className="w-3.5 h-3.5" />Buat QR Dinamis</button>
+            </div>
+            {qr?.loc === l.locationId && (
+              <div className="mt-3 flex flex-col items-center gap-1">
+                <img src={qr.url} alt="QR lokasi" width={140} height={140} className="rounded border border-border" />
+                <p className="text-[10px] text-muted-foreground text-center">QR dinamis aktif — tampilkan di pintu masuk untuk dipindai karyawan</p>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1255,7 +1411,9 @@ function useBackendData(enabled = true) {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [employees, setEmployees] = useState<ApiEmployee[]>([]);
+  const [locations, setLocations] = useState<ApiLocation[]>([]);
   const [connected, setConnected] = useState(false);
+  const [authed, setAuthed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef<string | null>(null);
   const codeCache = useRef<Record<string, string>>({});
@@ -1268,8 +1426,9 @@ function useBackendData(enabled = true) {
     if (!t) return;
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const [board, leaves, emps] = await Promise.all([api.attendance(t), api.leaves(t), api.employees(t)]);
+      const [board, leaves, emps, locs] = await Promise.all([api.attendance(t), api.leaves(t), api.employees(t), api.locations(t)]);
       setEmployees(emps);
+      setLocations(locs);
       const lr: LeaveRequest[] = leaves.map((l: ApiLeaveRow) => ({
         id: l.requestId, employeeId: l.employeeId,
         type: l.type === "cuti" ? "cuti" : "izin",
@@ -1277,24 +1436,26 @@ function useBackendData(enabled = true) {
         reason: l.reason ?? "", status: l.status as LeaveRequest["status"],
       }));
       const approvedToday = lr.filter(l => l.status === "approved" && coversToday(l.startDate, l.endDate, today));
-      const att: AttendanceRecord[] = EMPLOYEES.map(emp => {
-        const row = board.find((r: ApiAttendanceRow) => r.employeeId === emp.id);
+      // Papan kehadiran dari karyawan ASLI (bukan mock): tiap karyawan → presensi
+      // hari ini bila ada, lalu cuti disetujui, lalu default tidak_hadir.
+      const att: AttendanceRecord[] = emps.map(emp => {
+        const row = board.find((r: ApiAttendanceRow) => r.employeeId === emp.employeeId);
         if (row && (row.check_in || row.check_out)) {
           return {
-            id: emp.id, employeeId: emp.id, date: today,
+            id: emp.employeeId, employeeId: emp.employeeId, date: today,
             checkIn: row.check_in, checkOut: row.check_out,
             status: row.status as AttendanceRecord["status"],
-            location: "Kantor Pusat Jakarta",
+            location: "—",
             method: (row.method as AttendanceRecord["method"]) ?? "manual",
           };
         }
-        const lv = approvedToday.find(l => l.employeeId === emp.id);
+        const lv = approvedToday.find(l => l.employeeId === emp.employeeId);
         if (lv) return {
-          id: emp.id, employeeId: emp.id, date: today, checkIn: null, checkOut: null,
+          id: emp.employeeId, employeeId: emp.employeeId, date: today, checkIn: null, checkOut: null,
           status: lv.type, location: "—", method: "manual",
         };
         return {
-          id: emp.id, employeeId: emp.id, date: today, checkIn: null, checkOut: null,
+          id: emp.employeeId, employeeId: emp.employeeId, date: today, checkIn: null, checkOut: null,
           status: "tidak_hadir", location: "—", method: "manual",
         };
       });
@@ -1308,21 +1469,31 @@ function useBackendData(enabled = true) {
     }
   }, []);
 
-  // Login admin sekali, lalu polling berkala (hanya bila enabled).
-  useEffect(() => {
-    if (!enabled) return;
-    let alive = true;
-    api.controlLogin(CONTROL_EMAIL, CONTROL_PASSWORD)
-      .then(r => { if (!alive) return; tokenRef.current = r.token; refresh(); })
-      .catch(e => alive && setError(e?.message ?? String(e)));
-    return () => { alive = false; };
-  }, [enabled, refresh]);
+  // Login admin EKSPLISIT (form), bukan auto-login demo. Token disimpan di memori
+  // (sesi); produksi bersih → admin login pakai kredensial perusahaannya sendiri.
+  const login = useCallback(async (email: string, password: string) => {
+    const r = await api.controlLogin(email.trim(), password);
+    tokenRef.current = r.token;
+    setAuthed(true);
+    setError(null);
+    await refresh();
+  }, [refresh]);
 
+  const logout = useCallback(() => {
+    const t = tokenRef.current;
+    if (t) { api.controlLogout?.(t).catch(() => {}); }
+    tokenRef.current = null;
+    setAuthed(false);
+    setAttendance([]); setLeaveRequests([]); setEmployees([]); setLocations([]);
+    codeCache.current = {};
+  }, []);
+
+  // Polling hanya setelah login.
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !authed) return;
     const id = setInterval(refresh, POLL_MS);
     return () => clearInterval(id);
-  }, [enabled, refresh]);
+  }, [enabled, authed, refresh]);
 
   // Kode personal karyawan (di-cache) — proof-of-identity saat check-in.
   const codeFor = useCallback(async (empId: string) => {
@@ -1379,10 +1550,20 @@ function useBackendData(enabled = true) {
     delete codeCache.current[id]; await refresh();
   }, [refresh]);
 
+  // Lokasi & QR
+  const createLocation = useCallback(async (body: LocationInput) => {
+    await api.createLocation(tokenRef.current!, body); await refresh();
+  }, [refresh]);
+  const createLocationQr = useCallback(async (locationId: string, interval: "hourly" | "daily" = "hourly") => {
+    const r = await api.createDynamicCode(tokenRef.current!, locationId, interval); await refresh(); return r;
+  }, [refresh]);
+
   return {
-    attendance, leaveRequests, employees, connected, error,
+    attendance, leaveRequests, employees, locations, connected, error,
+    authed, login, logout,
     checkIn, checkOut, approveLeave, rejectLeave,
     createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode,
+    createLocation, createLocationQr,
   };
 }
 
@@ -1474,8 +1655,8 @@ export default function App() {
 
   // Sumber kebenaran: backend Zylora (REST API). Menggantikan mock state + relay SSE.
   // Hook admin nonaktif di app-karyawan & di halaman tampilan barcode.
-  const { attendance, leaveRequests, employees, checkIn, checkOut, approveLeave, rejectLeave,
-    createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode } = useBackendData(!isEmployeePhone && !isDisplay);
+  const { attendance, leaveRequests, employees, locations, authed, login, logout, checkIn, checkOut, approveLeave, rejectLeave,
+    createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode, createLocation, createLocationQr } = useBackendData(!isEmployeePhone && !isDisplay);
 
   const handleCheckIn = useCallback((empId: string) => {
     checkIn(empId, systemMode === "qr_lokasi" ? "qr_lokasi" : "terminal");
@@ -1498,6 +1679,8 @@ export default function App() {
         onApproveLeave={approveLeave} onRejectLeave={rejectLeave}
         employees={employees} onCreateEmployee={createEmployee} onUpdateEmployee={updateEmployee}
         onDeleteEmployee={deleteEmployee} onResetCode={resetEmployeeCode}
+        authed={authed} onLogin={login} onLogout={logout}
+        locations={locations} onCreateLocation={createLocation} onCreateLocationQr={createLocationQr}
         qrVariant={qrVariant} setQrVariant={setQrVariant} qrInterval={qrInterval} setQrInterval={setQrInterval} />
     </div>
   );
@@ -1581,6 +1764,8 @@ export default function App() {
             <QRLokasiControlPanel attendance={attendance} leaveRequests={leaveRequests} onApproveLeave={approveLeave} onRejectLeave={rejectLeave}
               employees={employees} onCreateEmployee={createEmployee} onUpdateEmployee={updateEmployee}
               onDeleteEmployee={deleteEmployee} onResetCode={resetEmployeeCode}
+              authed={authed} onLogin={login} onLogout={logout}
+              locations={locations} onCreateLocation={createLocation} onCreateLocationQr={createLocationQr}
               qrVariant={qrVariant} setQrVariant={setQrVariant} qrInterval={qrInterval} setQrInterval={setQrInterval} />
           )
         ) : (

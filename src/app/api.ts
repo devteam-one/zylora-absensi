@@ -47,6 +47,16 @@ export type EmployeeInput = {
   schedule_in?: string; schedule_out?: string;
 };
 
+export type ApiLocation = {
+  locationId: string; name: string; address: string | null;
+  type: string; lat: number | null; lng: number | null; radius_m: number;
+};
+
+export type LocationInput = {
+  name?: string; address?: string | null; type?: string;
+  lat?: number | null; lng?: number | null; radius_m?: number;
+};
+
 type ReqOpts = { method?: string; token?: string | null; body?: unknown };
 
 async function req<T = any>(path: string, opts: ReqOpts = {}): Promise<T> {
@@ -74,6 +84,10 @@ export const api = {
     req<{ token: string; expires_in: number }>("/api/control/login", {
       method: "POST", body: { email, password },
     }),
+  controlLogout: (token: string) =>
+    req("/api/control/logout", { method: "POST", token }),
+  controlRegister: (body: { name: string; email: string; password: string; company_name: string }) =>
+    req<{ adminId: string; companyId: string }>("/api/control/register", { method: "POST", body }),
 
   // Dashboard admin (butuh token)
   attendance: (token: string, date?: string) =>
@@ -100,6 +114,14 @@ export const api = {
       `/api/employees/${id}/code`, { method: "POST", token, body: { format } }),
   resetEmployeeCode: (token: string, id: string) =>
     req(`/api/employees/${id}/code/reset`, { method: "POST", token }),
+
+  // Manajemen lokasi & QR (admin / Sistem Kontrol)
+  locations: (token: string) => req<ApiLocation[]>("/api/locations", { token }),
+  createLocation: (token: string, body: LocationInput) =>
+    req<{ locationId: string }>("/api/locations", { method: "POST", token, body }),
+  createDynamicCode: (token: string, locationId: string, interval: "hourly" | "daily" = "hourly") =>
+    req<{ codeId: string; type: string; interval: string; qrImageUrl: string }>(
+      `/api/locations/${locationId}/codes/dynamic`, { method: "POST", token, body: { interval } }),
 
   // Auth & self-service KARYAWAN (token peran 'employee', terpisah dari admin)
   employeeLogin: (employeeId: string, password: string) =>
