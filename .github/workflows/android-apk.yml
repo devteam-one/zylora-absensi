@@ -14,7 +14,7 @@ on:
         required: false
         default: "https://api.13-218-74-178.sslip.io"
       role:
-        description: "Frontend yang dibungkus: employee | control"
+        description: "Frontend yang dibungkus: employee | display (Sistem Kontrol KHUSUS desktop, bukan APK)"
         required: false
         default: "employee"
 
@@ -39,6 +39,13 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
+
+      - name: Validasi role (Sistem Kontrol bukan APK)
+        run: |
+          if [ "$ROLE" = "control" ]; then
+            echo "::error::role 'control' = Sistem Kontrol KHUSUS desktop (Electron), bukan APK. Pakai workflow Desktop. Role APK: employee | display."
+            exit 1
+          fi
 
       - name: Build web (frontend ${{ env.ROLE }})
         run: |

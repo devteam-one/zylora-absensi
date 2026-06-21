@@ -2133,6 +2133,20 @@ export default function App() {
   // app-nya tanpa "chrome" peraga prototipe (selektor Model Sistem + tab :5173/:5174,
   // yang hanya relevan untuk demo single-screen). Pola sama seperti isDisplay.
   if (APP_ROLE === "employee") return <QRLokasiEmployeeApp />;
+
+  // Sistem Kontrol KHUSUS DESKTOP — blokir bila dijalankan sebagai app native (Android/iOS).
+  // Desktop (Electron) memuat build web biasa → tanpa Capacitor → tetap tampil.
+  if (APP_ROLE === "control" && typeof window !== "undefined" && (window as any).Capacitor?.isNativePlatform?.()) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-[#0D1B2A] p-6 text-center" style={{ fontFamily: "var(--font-sans)" }}>
+        <div className="max-w-sm">
+          <div className="w-14 h-14 rounded-2xl bg-[#1B3D72] flex items-center justify-center mx-auto mb-4"><Monitor className="w-7 h-7 text-white" /></div>
+          <h2 className="text-white font-bold text-lg mb-2">Sistem Kontrol khusus Desktop</h2>
+          <p className="text-white/60 text-sm">Panel admin tidak tersedia di aplikasi HP/Android. Buka aplikasi <b>desktop</b> (Windows/macOS/Linux) Zylora Sistem Kontrol.</p>
+        </div>
+      </div>
+    );
+  }
   if (APP_ROLE === "control") return (
     <div className="h-screen overflow-hidden bg-background" style={{ fontFamily: "var(--font-sans)" }}>
       <QRLokasiControlPanel attendance={attendance} leaveRequests={leaveRequests}
