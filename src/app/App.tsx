@@ -862,7 +862,7 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
   onDelete: (id: string, soft?: boolean) => Promise<void>;
   onResetCode: (id: string) => Promise<void>;
 }) {
-  const EMPTY: EmployeeInput = { name: "", email: "", position: "", department: "", schedule_in: "08:00", schedule_out: "17:00" };
+  const EMPTY: EmployeeInput = { name: "", email: "", position: "", department: "", schedule_in: "08:00", schedule_out: "17:00", password: "" };
   const [mode, setMode] = useState<"list" | "form">("list");
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<EmployeeInput>(EMPTY);
@@ -874,7 +874,7 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
   const openEdit = (e: ApiEmployee) => {
     setEditId(e.employeeId);
     setForm({ name: e.name, email: e.email ?? "", position: e.position ?? "", department: e.department ?? "",
-      schedule_in: e.schedule.in ?? "08:00", schedule_out: e.schedule.out ?? "17:00", status: e.status });
+      schedule_in: e.schedule.in ?? "08:00", schedule_out: e.schedule.out ?? "17:00", status: e.status, password: "" });
     setErr(""); setMode("form");
   };
   const save = async () => {
@@ -919,6 +919,13 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
         {field("Jam Masuk", "schedule_in", "time")}
         {field("Jam Keluar", "schedule_out", "time")}
       </div>
+      <div>
+        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">PIN / Password Login Karyawan</label>
+        <input type="text" value={form.password ?? ""} placeholder={editId ? "Kosongkan jika tidak diubah" : "mis. 123456 — untuk login app karyawan"}
+          onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+          className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+        <p className="text-[11px] text-muted-foreground mt-1">{editId ? "Isi untuk mengganti PIN karyawan." : "Tanpa PIN, karyawan tidak bisa login di app & absen."}</p>
+      </div>
       {editId && (
         <div>
           <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Status</label>
@@ -946,7 +953,7 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
       <div className="bg-card rounded-xl border border-border overflow-hidden">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border bg-muted/30">
-            {["Karyawan", "Departemen", "Jadwal", "Status", "Kode", "Aksi"].map(h => (
+            {["Karyawan", "Departemen", "Jadwal", "Status", "QR / PIN", "Aksi"].map(h => (
               <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
             ))}
           </tr></thead>
@@ -968,7 +975,10 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
                 <td className="px-4 py-2.5"><span className="text-xs">{e.department || "—"}</span></td>
                 <td className="px-4 py-2.5"><span className="font-mono text-xs">{e.schedule.in ?? "—"}–{e.schedule.out ?? "—"}</span></td>
                 <td className="px-4 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${e.status === "active" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-muted text-muted-foreground border-border"}`}>{e.status === "active" ? "Aktif" : "Nonaktif"}</span></td>
-                <td className="px-4 py-2.5"><span className={`text-[11px] ${e.barcode ? "text-emerald-600" : "text-muted-foreground"}`}>{e.barcode ? "✓ ada" : "—"}</span></td>
+                <td className="px-4 py-2.5">
+                  <span className={`text-[11px] block ${e.barcode ? "text-emerald-600" : "text-muted-foreground"}`}>QR {e.barcode ? "✓" : "—"}</span>
+                  <span className={`text-[11px] block ${e.has_pin ? "text-emerald-600" : "text-amber-600"}`}>PIN {e.has_pin ? "✓" : "✗"}</span>
+                </td>
                 <td className="px-4 py-2.5">
                   {confirmId === e.employeeId ? (
                     <span className="flex items-center gap-1.5">

@@ -39,12 +39,14 @@ export type ApiEmployee = {
   start_date: string | null; status: string;
   schedule: { in: string | null; out: string | null };
   barcode: string | null;
+  has_pin?: boolean;
 };
 
 export type EmployeeInput = {
   name?: string; email?: string | null; position?: string | null;
   department?: string | null; start_date?: string | null; status?: string;
   schedule_in?: string; schedule_out?: string;
+  password?: string;  // PIN/password login app karyawan
 };
 
 export type ApiLocation = {

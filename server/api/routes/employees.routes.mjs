@@ -2,7 +2,7 @@
 import { json, noContent, ApiError } from "../lib/http.mjs";
 import { requireFields, pick, assert } from "../lib/validate.mjs";
 import { get, all, run } from "../lib/db.mjs";
-import { genId, nowISO } from "../lib/security.mjs";
+import { genId, nowISO, hashPassword } from "../lib/security.mjs";
 import { employeeCode, qrImageUrl } from "../lib/qr.mjs";
 import { requireControl, audit } from "../lib/middleware.mjs";
 
@@ -25,6 +25,7 @@ function serialize(emp) {
     status: emp.status,
     schedule: { in: emp.schedule_in, out: emp.schedule_out },
     barcode: code?.code || null,
+    has_pin: !!emp.password_hash,
   };
 }
 
@@ -34,10 +35,12 @@ export function register(router) {
     const b = ctx.body;
     requireFields(b, ["name"]);
     const id = genId("emp");
+    const pin = b.password || b.pin;  // PIN/password login app karyawan (opsional)
     run(
-      `INSERT INTO employees (id, company_id, name, email, position, department, start_date, status, schedule_in, schedule_out, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      id, ctx.auth.companyId, b.name, b.email || null, b.position || null, b.department || null,
+      `INSERT INTO employees (id, company_id, name, email, password_hash, position, department, start_date, status, schedule_in, schedule_out, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      id, ctx.auth.companyId, b.name, b.email || null, pin ? hashPassword(String(pin)) : null,
+      b.position || null, b.department || null,
       b.start_date || null, "active", b.schedule_in || "08:00", b.schedule_out || "17:00", nowISO(),
     );
     audit(ctx, "employee.create", { id });
@@ -67,12 +70,16 @@ export function register(router) {
       "name", "email", "position", "department", "start_date", "status", "schedule_in", "schedule_out",
     ]);
     const keys = Object.keys(fields);
-    assert(keys.length > 0, 400, "Tidak ada field yang diperbarui");
+    const pin = ctx.body.password || ctx.body.pin;  // set PIN baru (opsional)
+    assert(keys.length > 0 || pin, 400, "Tidak ada field yang diperbarui");
+    const sets = keys.map((k) => `${k} = ?`);
+    const vals = keys.map((k) => fields[k]);
+    if (pin) { sets.push("password_hash = ?"); vals.push(hashPassword(String(pin))); }
     run(
-      `UPDATE employees SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ? AND company_id = ?`,
-      ...keys.map((k) => fields[k]), ctx.params.id, ctx.auth.companyId,
+      `UPDATE employees SET ${sets.join(", ")} WHERE id = ? AND company_id = ?`,
+      ...vals, ctx.params.id, ctx.auth.companyId,
     );
-    audit(ctx, "employee.update", { id: ctx.params.id, fields: keys });
+    audit(ctx, "employee.update", { id: ctx.params.id, fields: [...keys, ...(pin ? ["pin"] : [])] });
     json(ctx.res, 200, serialize(ownedEmployee(ctx, ctx.params.id)));
   });
 
