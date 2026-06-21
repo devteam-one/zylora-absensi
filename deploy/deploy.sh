@@ -41,6 +41,9 @@ echo "[2/5] Menyiapkan direktori remote $REMOTE_DIR ..."
 $SSH "$TARGET" "sudo mkdir -p '$REMOTE_DIR' && sudo chown \$(whoami):\$(whoami) '$REMOTE_DIR'"
 
 echo "[3/5] Menyalin backend (server/api, tanpa data/) + berkas deploy ..."
+# Suntik identitas versi (SemVer + commit + tanggal) ke server/api/version.json
+# agar backend bisa menyajikannya di /api/version & /health.
+node -e "const v=JSON.parse(require('fs').readFileSync('version.json','utf8'));let c='unknown';try{c=require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}catch{};v.commit=c;v.buildDate=new Date().toISOString();require('fs').writeFileSync('server/api/version.json',JSON.stringify(v,null,2)+'\n');console.log('  version.json →',v.version,v.commit)"
 rsync -az --delete -e "$SSH" --exclude 'data/' \
   server/api/ "$TARGET:$REMOTE_DIR/api/"
 rsync -az -e "$SSH" \

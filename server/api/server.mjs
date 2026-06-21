@@ -11,6 +11,9 @@
 // Endpoint diaktifkan modular dari routes/*.mjs (lihat routes/index.mjs).
 // ─────────────────────────────────────────────────────────────────────────────
 import http from "node:http";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { Router, json } from "./lib/http.mjs";
 import { registerAll } from "./routes/index.mjs";
 import { seedIfEmpty } from "./seed.mjs";
@@ -19,10 +22,34 @@ const PORT = Number(process.env.ZYLORA_PORT) || 5181;
 // 127.0.0.2: konsisten dengan host dua-port frontend & sync-server.
 const HOST = process.env.ZYLORA_HOST || "127.0.0.2";
 
+// Identitas versi (sumber tunggal version.json). Saat deploy disalin ke samping
+// server.mjs; saat dev dibaca dari root repo. Fallback aman bila tak ada.
+const HERE = dirname(fileURLToPath(import.meta.url));
+function loadVersion() {
+  for (const p of [join(HERE, "version.json"), join(HERE, "../../version.json")]) {
+    try { return JSON.parse(readFileSync(p, "utf8")); } catch { /* coba berikutnya */ }
+  }
+  return { name: "Zylora", product: "Zylora Absensi & HRIS", version: process.env.ZYLORA_VERSION || "1.0.0", channel: "stable", apiContract: "v1" };
+}
+const VERSION = loadVersion();
+const BUILD = {
+  commit: VERSION.commit || process.env.ZYLORA_COMMIT || "unknown",
+  date: VERSION.buildDate || process.env.ZYLORA_BUILD_DATE || null,
+};
+const STARTED_AT = new Date().toISOString();
+
 const router = Router();
 
-// Health check (tanpa auth).
-router.get("/health", (ctx) => json(ctx.res, 200, { ok: true, service: "zylora-api" }));
+// Health check (tanpa auth) — ringkas, untuk probe/uptime monitor.
+router.get("/health", (ctx) => json(ctx.res, 200, { ok: true, service: "zylora-api", version: VERSION.version }));
+
+// Identitas versi lengkap (tanpa auth) — untuk cek kompatibilitas klien & audit.
+router.get("/api/version", (ctx) => json(ctx.res, 200, {
+  name: VERSION.name, product: VERSION.product, version: VERSION.version,
+  channel: VERSION.channel, apiContract: VERSION.apiContract,
+  commit: BUILD.commit, buildDate: BUILD.date,
+  startedAt: STARTED_AT, uptimeSec: Math.round(process.uptime()),
+}));
 
 registerAll(router);
 
@@ -55,5 +82,5 @@ server.on("error", (err) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[zylora] REST API listening on http://${HOST}:${PORT}`);
+  console.log(`[zylora] ${VERSION.product} v${VERSION.version} (${VERSION.channel}, ${BUILD.commit}) — REST API listening on http://${HOST}:${PORT}`);
 });

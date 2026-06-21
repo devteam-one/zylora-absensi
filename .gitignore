@@ -37,3 +37,4 @@ ds-bundle/
 
 # Misc OS
 .DS_Store
+server/api/version.json

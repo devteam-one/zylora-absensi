@@ -1,8 +1,16 @@
 import { defineConfig } from 'vite'
 import path from 'path'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+
+// Identitas versi terpusat (sumber tunggal: version.json) + metadata build.
+const VINFO = JSON.parse(readFileSync(path.resolve(__dirname, 'version.json'), 'utf8'))
+const BUILD_SHA = (process.env.GITHUB_SHA || (() => {
+  try { return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() } catch { return 'local' }
+})()).slice(0, 7)
+const BUILD_DATE = process.env.BUILD_DATE || new Date().toISOString()
 
 
 // Stempel VERSION cache service worker dengan id build unik tiap kali build.
@@ -102,5 +110,12 @@ export default defineConfig({
     'import.meta.env.VITE_ROLE': JSON.stringify(process.env.VITE_ROLE || ''),
     // versionCode build (sama dgn versionCode Android) untuk cek update OTA in-app.
     'import.meta.env.VITE_VERSION_CODE': JSON.stringify(process.env.VITE_VERSION_CODE || '0'),
+    // Identitas versi (SemVer) + metadata build — sumber tunggal version.json.
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(VINFO.version),
+    'import.meta.env.VITE_APP_NAME': JSON.stringify(VINFO.name),
+    'import.meta.env.VITE_APP_PRODUCT': JSON.stringify(VINFO.product),
+    'import.meta.env.VITE_APP_CHANNEL': JSON.stringify(VINFO.channel),
+    'import.meta.env.VITE_BUILD_SHA': JSON.stringify(BUILD_SHA),
+    'import.meta.env.VITE_BUILD_DATE': JSON.stringify(BUILD_DATE),
   },
 })

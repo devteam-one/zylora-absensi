@@ -102,6 +102,24 @@ function useDynamicQR(intervalSec: number) {
 // through the SSE relay in server/sync-server.mjs instead of React state.
 const APP_ROLE = (import.meta.env.VITE_ROLE || "") as "employee" | "control" | "display" | "";
 
+// ─── Identitas versi (sumber tunggal: version.json, di-bake saat build) ────────
+const env = (import.meta as any).env || {};
+export const BUILD = {
+  name: env.VITE_APP_NAME || "Zylora",
+  product: env.VITE_APP_PRODUCT || "Zylora Absensi & HRIS",
+  version: env.VITE_APP_VERSION || "0.0.0",
+  channel: env.VITE_APP_CHANNEL || "dev",
+  sha: env.VITE_BUILD_SHA || "local",
+  code: String(env.VITE_VERSION_CODE || "0"),
+  date: env.VITE_BUILD_DATE || "",
+} as const;
+// Label versi ringkas: v1.0.0 · a1b2c3d (· channel bila bukan stable).
+export const VERSION_LABEL = `v${BUILD.version} · ${BUILD.sha}${BUILD.channel !== "stable" ? ` · ${BUILD.channel}` : ""}`;
+function VersionTag({ className = "" }: { className?: string }) {
+  const built = BUILD.date ? new Date(BUILD.date).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "";
+  return <span className={className} title={`${BUILD.product}\nVersi ${BUILD.version} (build ${BUILD.code})\ncommit ${BUILD.sha}${built ? `\ndibangun ${built}` : ""}`}>{VERSION_LABEL}</span>;
+}
+
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: AttendanceRecord["status"] }) {
@@ -335,6 +353,7 @@ function QRLokasiEmployeeApp() {
                 className="w-full mt-3 py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
                 {busy ? "Memproses…" : <>Masuk <ArrowRight className="w-4 h-4" /></>}
               </button>
+              <VersionTag className="block text-center font-mono text-[10px] text-muted-foreground/60 mt-4" />
             </motion.div>
           </div>
         ) : employee ? (
@@ -588,7 +607,8 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
             {connected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
             {connected ? "Terhubung ke server" : online ? "Server tak terjangkau" : "Tidak ada internet"}
           </div>
-          <p className="font-mono text-white/70 text-xs mt-0.5 mb-2 tabular-nums">{fmtTime(now)}</p>
+          <p className="font-mono text-white/70 text-xs mt-0.5 tabular-nums">{fmtTime(now)}</p>
+          <VersionTag className="block font-mono text-[10px] text-white/30 mb-2" />
           <button onClick={onLogout} className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white/70 bg-white/10 hover:bg-white/20 transition-colors">
             <LogOut className="w-3.5 h-3.5" />Keluar
           </button>
@@ -1700,6 +1720,7 @@ function QRDisplayPage() {
       <p className="text-white/40 text-xs mt-3">Buka aplikasi Zylora di ponsel lalu pindai kode di atas</p>
       {err && <p className="text-red-400 text-xs mt-3">{err}</p>}
       <p className="absolute bottom-6 text-white/30 text-[11px] font-mono">{fmtDate(now)}</p>
+      <VersionTag className="absolute bottom-6 right-8 text-white/25 text-[11px] font-mono" />
     </div>
   );
 }

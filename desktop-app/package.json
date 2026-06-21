@@ -1,9 +1,12 @@
 {
   "name": "zylora-sistem-kontrol-desktop",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Pembungkus Electron untuk installer desktop Sistem Kontrol Zylora (Windows/macOS/Linux).",
-  "author": { "name": "Zylora", "email": "noreply@zylora.app" },
+  "author": {
+    "name": "Zylora",
+    "email": "noreply@zylora.app"
+  },
   "homepage": "https://kontrol.13-218-74-178.sslip.io",
   "main": "main.js",
   "scripts": {
@@ -16,11 +19,31 @@
   "build": {
     "appId": "id.zylora.kontrol",
     "productName": "Zylora Sistem Kontrol",
-    "files": ["main.js", "www/**/*"],
-    "directories": { "output": "dist-installers" },
-    "win": { "target": "nsis", "artifactName": "ZyloraSistemKontrol-Setup-${version}.${ext}" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
-    "mac": { "target": "dmg", "category": "public.app-category.business" },
-    "linux": { "target": ["AppImage", "deb"], "category": "Office" }
+    "files": [
+      "main.js",
+      "www/**/*"
+    ],
+    "directories": {
+      "output": "dist-installers"
+    },
+    "win": {
+      "target": "nsis",
+      "artifactName": "ZyloraSistemKontrol-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.business"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office"
+    }
   }
 }
