@@ -1251,6 +1251,18 @@ export default function App() {
   // App #3: halaman tampilan barcode = layar mandiri (tanpa tab/selector).
   if (isDisplay) return <QRDisplayPage />;
 
+  // Build per-role (VITE_ROLE) = deployment NYATA (APK/desktop): tampilkan langsung
+  // app-nya tanpa "chrome" peraga prototipe (selektor Model Sistem + tab :5173/:5174,
+  // yang hanya relevan untuk demo single-screen). Pola sama seperti isDisplay.
+  if (APP_ROLE === "employee") return <QRLokasiEmployeeApp />;
+  if (APP_ROLE === "control") return (
+    <div className="h-screen overflow-hidden bg-background" style={{ fontFamily: "var(--font-sans)" }}>
+      <QRLokasiControlPanel attendance={attendance} leaveRequests={leaveRequests}
+        onApproveLeave={approveLeave} onRejectLeave={rejectLeave}
+        qrVariant={qrVariant} setQrVariant={setQrVariant} qrInterval={qrInterval} setQrInterval={setQrInterval} />
+    </div>
+  );
+
   const MODE_CFG = {
     qr_lokasi: {
       label: "QR Ditempel / Ditampilkan di Lokasi",
