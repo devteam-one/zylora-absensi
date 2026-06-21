@@ -322,7 +322,7 @@ function QRLokasiEmployeeApp() {
   const doLogin = async () => {
     setBusy(true); setLoginErr("");
     try {
-      const r = await api.employeeLogin(loginId.trim().toUpperCase(), loginPin.trim());
+      const r = await api.employeeLogin(loginId.trim(), loginPin.trim());
       setToken(r.token);
       setMe(await api.me(r.token));
       try { setLocName((await api.publicLocation()).name); } catch { /* abaikan */ }
@@ -391,9 +391,9 @@ function QRLokasiEmployeeApp() {
               </div>
               <h2 className="font-bold text-lg mb-1">Masuk ke Aplikasi</h2>
               <p className="text-sm text-muted-foreground mb-5">Gunakan ID karyawan Anda untuk login, lalu pindai QR yang ditempel di lokasi absen.</p>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">ID Karyawan</label>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">ID atau Email</label>
               <input value={loginId} onChange={e => setLoginId(e.target.value)}
-                placeholder="EMP001"
+                placeholder="ID atau email dari admin"
                 className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-3 transition-all" />
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">PIN</label>
               <input value={loginPin} onChange={e => setLoginPin(e.target.value)} type="password"
@@ -401,7 +401,7 @@ function QRLokasiEmployeeApp() {
                 placeholder="••••••"
                 className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-1 transition-all" />
               {loginErr && <p className="text-xs text-destructive mb-2">{loginErr}</p>}
-              <p className="text-[11px] text-muted-foreground mt-2">Demo: ID EMP001–EMP008 · PIN 123456</p>
+              <p className="text-[11px] text-muted-foreground mt-2">ID &amp; PIN dibuat oleh admin di Sistem Kontrol → Karyawan.</p>
               <button onClick={doLogin} disabled={!loginId.trim() || !loginPin.trim() || busy}
                 className="w-full mt-3 py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
                 {busy ? "Memproses…" : <>Masuk <ArrowRight className="w-4 h-4" /></>}

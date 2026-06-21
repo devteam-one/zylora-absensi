@@ -26,7 +26,9 @@ export function register(router) {
   router.post("/api/employee/login", rateLimit({ max: 20 }), (ctx) => {
     const b = ctx.body;
     requireFields(b, ["employeeId", "password"]);
-    const emp = get("SELECT * FROM employees WHERE id = ?", b.employeeId);
+    // Terima ID karyawan ATAU email (lebih ramah dari ID acak emp_xxx).
+    const ident = String(b.employeeId).trim();
+    const emp = get("SELECT * FROM employees WHERE id = ? OR (email IS NOT NULL AND lower(email) = lower(?))", ident, ident);
     if (!emp || !emp.password_hash || !verifyPassword(b.password, emp.password_hash)) {
       throw new ApiError(401, "ID karyawan atau PIN salah", "BAD_CREDENTIALS");
     }
