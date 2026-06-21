@@ -223,12 +223,4 @@ export const api = {
 
   // Publik (kiosk / app karyawan)
   publicLocation: () => req<ApiPublicLocation>("/api/public/location"),
-
-  // Presensi (dipanggil saat scan)
-  checkin: (body: {
-    employee_code: string; location_token: string;
-    lat?: number | null; lng?: number | null; method?: string;
-  }) => req("/api/attendance/checkin", { method: "POST", body }),
-  checkout: (body: { employee_code: string; location_token: string }) =>
-    req("/api/attendance/checkout", { method: "POST", body }),
 };

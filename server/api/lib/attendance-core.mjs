@@ -24,15 +24,6 @@ export function distanceM(lat1, lng1, lat2, lng2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// Identifikasi karyawan dari kode personal ber-tanda-tangan (dipakai jalur kiosk).
-export function resolveEmployeeByCode(code) {
-  const row = get("SELECT employee_id FROM employee_codes WHERE code = ?", code);
-  if (!row) throw new ApiError(401, "Kode karyawan tidak dikenal", "BAD_EMPLOYEE_CODE");
-  const emp = get("SELECT * FROM employees WHERE id = ?", row.employee_id);
-  if (!emp || emp.status !== "active") throw new ApiError(403, "Karyawan nonaktif", "INACTIVE");
-  return emp;
-}
-
 // Cari lokasi sah dari token QR (statis exact-match / dinamis dalam jendela waktu).
 export function resolveLocation(token) {
   if (typeof token !== "string") throw new ApiError(400, "Token lokasi wajib", "NO_TOKEN");

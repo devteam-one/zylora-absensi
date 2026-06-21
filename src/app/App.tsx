@@ -1234,7 +1234,7 @@ function PengaturanTab({ token }: { token: string }) {
       {settings && <div className="bg-card rounded-xl border border-border p-5 space-y-3">
         <p className="font-semibold text-sm">Pengaturan Aplikasi</p>
         <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Mode Absensi</label>
-          <select className={inputCls} value={settings.attendance_mode} onChange={e => setSettings({ ...settings, attendance_mode: e.target.value })}><option value="qr_dynamic">QR Dinamis</option><option value="qr_static">QR Statis</option><option value="terminal_scan">Terminal Scan</option></select></div>
+          <select className={inputCls} value={settings.attendance_mode} onChange={e => setSettings({ ...settings, attendance_mode: e.target.value })}><option value="qr_dynamic">QR Dinamis</option><option value="qr_static">QR Statis</option></select></div>
         <div className="grid grid-cols-2 gap-3">
           <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Zona Waktu</label><input className={inputCls} value={settings.timezone ?? ""} onChange={e => setSettings({ ...settings, timezone: e.target.value })} /></div>
           <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Bahasa</label><input className={inputCls} value={settings.language ?? ""} onChange={e => setSettings({ ...settings, language: e.target.value })} /></div>
@@ -1589,35 +1589,6 @@ function useBackendData(enabled = true) {
     return () => clearInterval(id);
   }, [enabled, authed, refresh]);
 
-  // Kode personal karyawan (di-cache) — proof-of-identity saat check-in.
-  const codeFor = useCallback(async (empId: string) => {
-    if (!codeCache.current[empId]) {
-      const c = await api.employeeCode(tokenRef.current!, empId);
-      codeCache.current[empId] = c.code;
-    }
-    return codeCache.current[empId];
-  }, []);
-
-  const checkIn = useCallback(async (empId: string, method: string) => {
-    try {
-      const [code, loc] = await Promise.all([codeFor(empId), api.publicLocation()]);
-      await api.checkin({ employee_code: code, location_token: loc.token, lat: loc.lat, lng: loc.lng, method });
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
-    await refresh();
-  }, [codeFor, refresh]);
-
-  const checkOut = useCallback(async (empId: string) => {
-    try {
-      const [code, loc] = await Promise.all([codeFor(empId), api.publicLocation()]);
-      await api.checkout({ employee_code: code, location_token: loc.token });
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
-    await refresh();
-  }, [codeFor, refresh]);
-
   const approveLeave = useCallback(async (id: string) => {
     try { await api.approveLeave(tokenRef.current!, id, true); } catch (e: any) { setError(e?.message ?? String(e)); }
     await refresh();
@@ -1655,7 +1626,7 @@ function useBackendData(enabled = true) {
   return {
     attendance, leaveRequests, employees, locations, connected, error,
     authed, token, login, logout,
-    checkIn, checkOut, approveLeave, rejectLeave,
+    approveLeave, rejectLeave,
     createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode,
     createLocation, createLocationQr,
   };

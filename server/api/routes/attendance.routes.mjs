@@ -1,36 +1,13 @@
-// ─── Presensi via kiosk/terminal (publik) ─────────────────────────────────────
-// Terminal di lokasi memindai kode personal (ID card) karyawan lalu mencatat
-// presensi. Identitas dibuktikan oleh kode yang dipindai — bukan login. Untuk
-// app karyawan (login sendiri) lihat employee.routes (/api/me/checkin).
+// ─── Papan presensi (dashboard admin) ─────────────────────────────────────────
+// Presensi karyawan dicatat lewat app karyawan (login sendiri) di
+// employee.routes (/api/me/checkin). Endpoint kiosk/terminal lama sudah dihapus
+// karena mode terminal tidak dipakai. File ini hanya menyajikan papan presensi.
 import { json } from "../lib/http.mjs";
-import { requireFields } from "../lib/validate.mjs";
 import { all } from "../lib/db.mjs";
 import { requireControl } from "../lib/middleware.mjs";
-import {
-  resolveEmployeeByCode, resolveLocation, checkGeo,
-  recordCheckin, recordCheckout, todayStr,
-} from "../lib/attendance-core.mjs";
+import { todayStr } from "../lib/attendance-core.mjs";
 
 export function register(router) {
-  // Kiosk memindai ID card → check-in.
-  router.post("/api/attendance/checkin", (ctx) => {
-    const b = ctx.body;
-    requireFields(b, ["employee_code", "location_token"]);
-    const emp = resolveEmployeeByCode(b.employee_code);
-    const loc = resolveLocation(b.location_token);
-    checkGeo(loc, b.lat, b.lng);
-    json(ctx.res, 201, recordCheckin(emp, loc, { lat: b.lat, lng: b.lng, method: b.method }));
-  });
-
-  // Kiosk memindai ID card lagi saat pulang → check-out.
-  router.post("/api/attendance/checkout", (ctx) => {
-    const b = ctx.body;
-    requireFields(b, ["employee_code", "location_token"]);
-    const emp = resolveEmployeeByCode(b.employee_code);
-    const loc = resolveLocation(b.location_token); // validasi token + untuk bump seri
-    json(ctx.res, 200, recordCheckout(emp, loc));
-  });
-
   // Papan presensi hari ini untuk dashboard admin (?date=YYYY-MM-DD).
   router.get("/api/attendance", requireControl, (ctx) => {
     const date = ctx.query.date || todayStr();
