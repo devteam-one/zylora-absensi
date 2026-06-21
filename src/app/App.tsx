@@ -738,7 +738,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
               <div className="bg-card rounded-xl border border-border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead><tr className="border-b border-border bg-muted/30">
-                    {["Karyawan", "Check-In", "Check-Out", "Status", "Metode"].map(h => (
+                    {["Karyawan", "Tanggal", "Check-In", "Check-Out", "Status", "Metode"].map(h => (
                       <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
                     ))}
                   </tr></thead>
@@ -758,6 +758,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
                               </div>
                             </div>
                           </td>
+                          <td className="px-4 py-2.5"><span className="font-mono text-xs text-muted-foreground">{rec.date ? new Date(rec.date + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</span></td>
                           <td className="px-4 py-2.5"><span className={`font-mono text-sm ${rec.checkIn ? "font-semibold" : "text-muted-foreground"}`}>{rec.checkIn ?? "—"}</span></td>
                           <td className="px-4 py-2.5"><span className={`font-mono text-sm ${rec.checkOut ? "font-semibold" : "text-muted-foreground"}`}>{rec.checkOut ?? "—"}</span></td>
                           <td className="px-4 py-2.5"><StatusBadge status={rec.status} /></td>
