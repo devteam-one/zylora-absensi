@@ -90,8 +90,16 @@ async function req<T = any>(path: string, opts: ReqOpts = {}): Promise<T> {
   return data as T;
 }
 
+export type AppRelease = { versionCode: number; versionName?: string; url: string };
+export type AppManifest = Record<string, AppRelease>;
+
 export const api = {
   base: BASE,
+
+  // Manifest versi APK (OTA self-host di EC2). Soft: null bila gagal/ tak ada.
+  appManifest: (): Promise<AppManifest | null> =>
+    fetch(`${BASE}/downloads/version.json`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null),
 
   // Auth sistem kontrol
   controlLogin: (email: string, password: string) =>

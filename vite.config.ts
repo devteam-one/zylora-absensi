@@ -100,5 +100,7 @@ export default defineConfig({
   // scripts in package.json.
   define: {
     'import.meta.env.VITE_ROLE': JSON.stringify(process.env.VITE_ROLE || ''),
+    // versionCode build (sama dgn versionCode Android) untuk cek update OTA in-app.
+    'import.meta.env.VITE_VERSION_CODE': JSON.stringify(process.env.VITE_VERSION_CODE || '0'),
   },
 })

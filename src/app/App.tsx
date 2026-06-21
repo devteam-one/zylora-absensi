@@ -264,6 +264,30 @@ function QrScanner({ onDecoded, onError }: { onDecoded: (text: string) => void; 
   return <div id={holderId} className="w-full h-full [&_video]:w-full [&_video]:h-full [&_video]:object-cover" />;
 }
 
+// Banner update OTA (self-host EC2): bandingkan versionCode build (di-bake) dengan
+// manifest /downloads/version.json; bila ada versi lebih baru → tawarkan unduh APK.
+function UpdateBanner({ role }: { role: string }) {
+  const [upd, setUpd] = useState<{ versionName?: string; url: string } | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    const myVc = Number((import.meta as any).env?.VITE_VERSION_CODE || 0);
+    api.appManifest().then((m) => {
+      const rel = m?.[role];
+      if (rel && Number(rel.versionCode) > myVc) setUpd({ versionName: rel.versionName, url: rel.url });
+    }).catch(() => {});
+  }, [role]);
+  if (!upd || dismissed) return null;
+  return (
+    <div className="bg-amber-500 text-amber-950 px-4 py-2 flex items-center justify-between gap-2 text-sm flex-shrink-0">
+      <span className="flex items-center gap-2"><Download className="w-4 h-4 flex-shrink-0" />Pembaruan tersedia{upd.versionName ? ` (v${upd.versionName})` : ""}</span>
+      <span className="flex items-center gap-3">
+        <a href={upd.url} className="font-bold underline whitespace-nowrap">Unduh</a>
+        <button onClick={() => setDismissed(true)} className="opacity-70 hover:opacity-100"><X className="w-4 h-4" /></button>
+      </span>
+    </div>
+  );
+}
+
 // App karyawan — MANDIRI: login sebagai karyawan (JWT peran 'employee'), bukan
 // admin. Status & check-in lewat /api/me/*; identitas dari token (tak kirim kode).
 function QRLokasiEmployeeApp() {
@@ -340,6 +364,7 @@ function QRLokasiEmployeeApp() {
 
   return (
     <div className="flex flex-col h-full bg-background">
+      <UpdateBanner role="employee" />
       {/* Header */}
       <div className="bg-[#1B3D72] px-5 py-4 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2.5">
