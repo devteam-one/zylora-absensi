@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS location_codes (
   token        TEXT NOT NULL,                    -- nilai terbaru (dinamis dihitung ulang saat dibaca)
   status       TEXT NOT NULL DEFAULT 'active',   -- active | inactive
   interval     TEXT,                             -- hourly | daily (dinamis)
+  serial       INTEGER NOT NULL DEFAULT 0,       -- nomor seri; naik tiap scan (anti-replay)
   active_start TEXT,
   active_end   TEXT,
   expires_at   TEXT,
@@ -240,6 +241,7 @@ CREATE TABLE IF NOT EXISTS payslips (
 // Migrasi idempoten untuk DB lama (kolom/tabel baru). ALTER melempar bila kolom
 // sudah ada → diabaikan.
 try { db.exec("ALTER TABLE employees ADD COLUMN base_salary REAL NOT NULL DEFAULT 0"); } catch { /* kolom sudah ada */ }
+try { db.exec("ALTER TABLE location_codes ADD COLUMN serial INTEGER NOT NULL DEFAULT 0"); } catch { /* kolom sudah ada */ }
 
 // ─── Helper kueri ─────────────────────────────────────────────────────────────
 export const get = (sql, ...params) => db.prepare(sql).get(...params);

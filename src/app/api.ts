@@ -24,6 +24,7 @@ export type ApiLeaveRow = {
 export type ApiPublicLocation = {
   locationId: string; name: string; lat: number | null; lng: number | null;
   radius_m: number; type: string; token: string; qrImageUrl: string;
+  serial: number | null;
 };
 
 export type ApiMe = {

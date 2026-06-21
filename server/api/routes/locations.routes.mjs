@@ -22,7 +22,7 @@ function ownedCode(ctx, locationId, codeId) {
 // Untuk kode dinamis, token selalu dihitung ulang sesuai jendela waktu saat ini.
 function liveToken(code) {
   return code.type === "qr_dynamic"
-    ? dynamicToken(code.location_id, code.interval || "hourly")
+    ? dynamicToken(code.location_id, code.interval || "hourly", code.serial || 0)
     : code.token;
 }
 
@@ -34,6 +34,7 @@ function serializeCode(code) {
     type: code.type,
     status: code.status,
     interval: code.interval,
+    serial: code.type === "qr_dynamic" ? (code.serial || 0) : null,
     token,
     qrImageUrl: qrImageUrl(token),
     active_hours: code.active_start ? { start: code.active_start, end: code.active_end } : null,
@@ -128,11 +129,12 @@ export function register(router) {
   router.post("/api/locations/:locationId/codes/:codeId/refresh", requireControl, (ctx) => {
     const code = ownedCode(ctx, ctx.params.locationId, ctx.params.codeId);
     assert(code.type === "qr_dynamic", 400, "Hanya kode dinamis yang bisa di-refresh", "NOT_DYNAMIC");
-    const token = dynamicToken(ctx.params.locationId, code.interval || "hourly");
+    const newSerial = (code.serial || 0) + 1;
+    const token = dynamicToken(ctx.params.locationId, code.interval || "hourly", newSerial);
     const expires_at = new Date(Date.now() + (code.interval === "daily" ? 86400 : 3600) * 1000).toISOString();
-    run("UPDATE location_codes SET token = ?, expires_at = ?, updated_at = ? WHERE id = ?",
-      token, expires_at, nowISO(), ctx.params.codeId);
-    audit(ctx, "code.refresh", { codeId: ctx.params.codeId });
-    json(ctx.res, 200, { newCode: token, qrImageUrl: qrImageUrl(token), expires_at });
+    run("UPDATE location_codes SET serial = ?, token = ?, expires_at = ?, updated_at = ? WHERE id = ?",
+      newSerial, token, expires_at, nowISO(), ctx.params.codeId);
+    audit(ctx, "code.refresh", { codeId: ctx.params.codeId, serial: newSerial });
+    json(ctx.res, 200, { newCode: token, serial: newSerial, qrImageUrl: qrImageUrl(token), expires_at });
   });
 }

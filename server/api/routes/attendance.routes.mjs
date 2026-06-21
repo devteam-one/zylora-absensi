@@ -27,8 +27,8 @@ export function register(router) {
     const b = ctx.body;
     requireFields(b, ["employee_code", "location_token"]);
     const emp = resolveEmployeeByCode(b.employee_code);
-    resolveLocation(b.location_token); // validasi token saja
-    json(ctx.res, 200, recordCheckout(emp));
+    const loc = resolveLocation(b.location_token); // validasi token + untuk bump seri
+    json(ctx.res, 200, recordCheckout(emp, loc));
   });
 
   // Papan presensi hari ini untuk dashboard admin (?date=YYYY-MM-DD).

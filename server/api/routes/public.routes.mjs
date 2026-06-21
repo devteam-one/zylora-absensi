@@ -17,7 +17,7 @@ export function register(router) {
     if (!code) throw new ApiError(404, "Belum ada lokasi/kode aktif", "NO_LOCATION");
 
     const token = code.type === "qr_dynamic"
-      ? dynamicToken(code.location_id, code.interval || "hourly")
+      ? dynamicToken(code.location_id, code.interval || "hourly", code.serial || 0)
       : code.token;
 
     json(ctx.res, 200, {
@@ -28,6 +28,7 @@ export function register(router) {
       radius_m: code.radius_m,
       type: code.type,
       token,
+      serial: code.type === "qr_dynamic" ? (code.serial || 0) : null,
       qrImageUrl: qrImageUrl(token),
     });
   });

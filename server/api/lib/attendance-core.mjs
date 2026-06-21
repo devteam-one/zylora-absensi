@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { get, run } from "./db.mjs";
 import { genId, nowISO } from "./security.mjs";
-import { isValidDynamicToken } from "./qr.mjs";
+import { isValidDynamicToken, serialOf } from "./qr.mjs";
 import { ApiError } from "./http.mjs";
 import { assert } from "./validate.mjs";
 
@@ -42,10 +42,14 @@ export function resolveLocation(token) {
       "SELECT * FROM location_codes WHERE location_id = ? AND type = 'qr_dynamic' AND status = 'active'",
       locationId,
     );
-    if (code && isValidDynamicToken(token, locationId, code.interval || "hourly")) {
+    if (code && isValidDynamicToken(token, locationId, code.interval || "hourly", code.serial || 0)) {
       return get("SELECT * FROM locations WHERE id = ?", locationId);
     }
-    throw new ApiError(400, "QR dinamis kedaluwarsa atau tidak valid", "BAD_QR");
+    // Seri token tak cocok = QR sudah dipindai (sekali pakai) atau kedaluwarsa.
+    const used = code && serialOf(token) != null && serialOf(token) < (code.serial || 0);
+    throw new ApiError(400, used
+      ? "QR sudah dipindai (sekali pakai) — minta QR terbaru di layar lokasi"
+      : "QR dinamis kedaluwarsa atau tidak valid", "BAD_QR");
   }
   const code = get("SELECT * FROM location_codes WHERE token = ? AND status = 'active'", token);
   if (!code) throw new ApiError(400, "QR lokasi tidak valid", "BAD_QR");
@@ -71,6 +75,14 @@ export function approvedLeaveOn(employeeId, date) {
        AND start_date <= ? AND end_date >= ? LIMIT 1`,
     employeeId, date, date,
   );
+}
+
+// Naikkan nomor seri QR dinamis aktif sebuah lokasi → token yang barusan dipindai
+// jadi tak valid (sekali pakai); layar lokasi otomatis menampilkan QR seri baru.
+export function bumpCodeSerial(locationId) {
+  if (!locationId) return;
+  run("UPDATE location_codes SET serial = serial + 1, updated_at = ? WHERE location_id = ? AND type = 'qr_dynamic' AND status = 'active'",
+    nowISO(), locationId);
 }
 
 // Catat check-in untuk satu karyawan (emp = baris penuh). Melempar 409 bila sudah.
@@ -102,16 +114,18 @@ export function recordCheckin(emp, loc, { lat, lng, method } = {}) {
       genId("att"), emp.company_id, emp.id, date, time, status, m, loc.id, lat ?? null, lng ?? null, nowISO(),
     );
   }
+  bumpCodeSerial(loc.id); // tiap scan → seri QR berganti (anti-replay)
   return { employeeId: emp.id, name: emp.name, date, check_in: time, status, location: loc.name, method: m };
 }
 
 // Catat check-out. Melempar 409 bila belum check-in hari ini.
-export function recordCheckout(emp) {
+export function recordCheckout(emp, loc) {
   const date = todayStr();
   const rec = get("SELECT * FROM attendance WHERE employee_id = ? AND date = ?", emp.id, date);
   if (!rec?.check_in) throw new ApiError(409, "Belum check-in hari ini", "NOT_IN");
   const time = hhmm();
   run("UPDATE attendance SET check_out = ? WHERE id = ?", time, rec.id);
+  if (loc) bumpCodeSerial(loc.id); // scan checkout → seri berganti juga
   return { employeeId: emp.id, date, check_out: time };
 }
 

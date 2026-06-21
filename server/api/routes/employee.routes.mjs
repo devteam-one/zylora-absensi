@@ -75,7 +75,7 @@ export function register(router) {
   router.post("/api/me/checkout", requireEmployee, (ctx) => {
     const emp = meEmployee(ctx);
     requireFields(ctx.body, ["location_token"]);
-    resolveLocation(ctx.body.location_token); // validasi token
-    json(ctx.res, 200, recordCheckout(emp));
+    const loc = resolveLocation(ctx.body.location_token); // validasi token + bump seri
+    json(ctx.res, 200, recordCheckout(emp, loc));
   });
 }

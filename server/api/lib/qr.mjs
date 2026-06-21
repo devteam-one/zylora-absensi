@@ -38,21 +38,29 @@ export function staticToken(locationId) {
   return `ZYL-LOC-${locationId}-${nonce}-${sig(`static:${locationId}:${nonce}`)}`;
 }
 
-// Token QR dinamis untuk jendela waktu saat ini.
-export function dynamicToken(locationId, interval = "hourly", ms = nowMs()) {
+// Token QR dinamis untuk jendela waktu saat ini + nomor seri (anti-replay).
+// Format: ZYL-DYN-<loc>-<window>-S<serial>-<sig>. Seri naik tiap scan sehingga
+// token yang sudah dipindai jadi tak valid (lihat isValidDynamicToken).
+export function dynamicToken(locationId, interval = "hourly", serial = 0, ms = nowMs()) {
   const w = windowIndex(interval, ms);
-  return `ZYL-DYN-${locationId}-${w}-${sig(`dyn:${locationId}:${interval}:${w}`)}`;
+  return `ZYL-DYN-${locationId}-${w}-S${serial}-${sig(`dyn:${locationId}:${interval}:${w}:${serial}`)}`;
 }
 
-// Validasi token dinamis: cocok jika sesuai jendela sekarang atau satu jendela
-// sebelumnya (toleransi karyawan yang scan tepat saat pergantian).
-export function isValidDynamicToken(token, locationId, interval = "hourly", ms = nowMs()) {
+// Validasi token dinamis: cocok jika jendela sekarang/sebelumnya (toleransi
+// pergantian jam) DAN seri == seri aktif kode (sekali pakai).
+export function isValidDynamicToken(token, locationId, interval = "hourly", serial = 0, ms = nowMs()) {
   const wNow = windowIndex(interval, ms);
   for (const w of [wNow, wNow - 1]) {
-    const expected = `ZYL-DYN-${locationId}-${w}-${sig(`dyn:${locationId}:${interval}:${w}`)}`;
+    const expected = `ZYL-DYN-${locationId}-${w}-S${serial}-${sig(`dyn:${locationId}:${interval}:${w}:${serial}`)}`;
     if (token === expected) return true;
   }
   return false;
+}
+
+// Ekstrak nomor seri dari token dinamis (untuk pesan/diagnostik). null bila bukan.
+export function serialOf(token) {
+  const m = typeof token === "string" && token.match(/-S(\d+)-/);
+  return m ? Number(m[1]) : null;
 }
 
 // Kode personal karyawan (di-tanda-tangani agar tak bisa ditebak).

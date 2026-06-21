@@ -2071,7 +2071,9 @@ function QRDisplayPage() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 30000); // refresh token dinamis berkala
+    // Polling cepat: token sekali-pakai, seri naik tiap scan → QR harus segera
+    // diperbarui di layar setelah ada yang memindai.
+    const id = setInterval(load, 4000);
     return () => clearInterval(id);
   }, [load]);
 
@@ -2095,10 +2097,17 @@ function QRDisplayPage() {
         )}
       </div>
 
-      <div className="mt-6 flex items-center gap-2 text-sm">
+      {loc?.type === "qr_dynamic" && loc.serial != null && (
+        <div className="mt-4 text-center">
+          <p className="text-white/50 text-xs uppercase tracking-widest">Nomor Seri</p>
+          <p className="font-mono text-3xl font-bold tabular-nums text-accent">#{loc.serial}</p>
+        </div>
+      )}
+
+      <div className="mt-4 flex items-center gap-2 text-sm">
         {loc?.type === "qr_dynamic" ? (
           <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/15 text-accent border border-accent/30">
-            <Zap className="w-4 h-4" />Kode dinamis — berganti otomatis
+            <Zap className="w-4 h-4" />Kode dinamis · sekali pakai — seri berganti tiap scan
           </span>
         ) : loc ? (
           <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 text-white/70 border border-white/20">
