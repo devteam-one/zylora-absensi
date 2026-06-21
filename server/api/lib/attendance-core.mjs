@@ -62,9 +62,29 @@ export function checkGeo(loc, lat, lng) {
   }
 }
 
+// Cuti/izin/sakit DISETUJUI yang mencakup tanggal tsb (jika ada). Tanggal ISO
+// (YYYY-MM-DD) aman dibandingkan secara leksikografis.
+export function approvedLeaveOn(employeeId, date) {
+  return get(
+    `SELECT type, start_date, end_date FROM leave_requests
+     WHERE employee_id = ? AND status = 'approved'
+       AND start_date <= ? AND end_date >= ? LIMIT 1`,
+    employeeId, date, date,
+  );
+}
+
 // Catat check-in untuk satu karyawan (emp = baris penuh). Melempar 409 bila sudah.
 export function recordCheckin(emp, loc, { lat, lng, method } = {}) {
   const date = todayStr();
+
+  // Tolak bila karyawan resmi cuti/izin/sakit (disetujui) pada tanggal ini:
+  // tanpa ini catatan jadi kontradiktif — mis. ditandai "terlambat" padahal sah
+  // tidak masuk. Presensi & cuti dua tabel terpisah, jadi direkonsiliasi di sini.
+  const leave = approvedLeaveOn(emp.id, date);
+  if (leave) {
+    throw new ApiError(409, `Sedang ${leave.type} (disetujui) hari ini — tidak perlu absen`, "ON_LEAVE");
+  }
+
   const time = hhmm();
   const status = time > (emp.schedule_in || "08:00") ? "terlambat" : "hadir";
   const m = method === "terminal" ? "terminal" : "qr_lokasi";
