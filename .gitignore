@@ -26,6 +26,7 @@ android-app/package-lock.json
 
 # IDE
 .idea/
+.run/
 
 # Design-sync tooling (lihat .design-sync/NOTES.md)
 .ds-sync/

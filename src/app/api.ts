@@ -33,6 +33,20 @@ export type ApiMe = {
   today: { check_in: string | null; check_out: string | null; status: string } | null;
 };
 
+export type ApiEmployee = {
+  employeeId: string; name: string; email: string | null;
+  position: string | null; department: string | null;
+  start_date: string | null; status: string;
+  schedule: { in: string | null; out: string | null };
+  barcode: string | null;
+};
+
+export type EmployeeInput = {
+  name?: string; email?: string | null; position?: string | null;
+  department?: string | null; start_date?: string | null; status?: string;
+  schedule_in?: string; schedule_out?: string;
+};
+
 type ReqOpts = { method?: string; token?: string | null; body?: unknown };
 
 async function req<T = any>(path: string, opts: ReqOpts = {}): Promise<T> {
@@ -71,6 +85,21 @@ export const api = {
   employeeCode: (token: string, employeeId: string) =>
     req<{ code: string; imageUrl: string; format: string }>(
       `/api/employees/${employeeId}/code`, { token }),
+
+  // Manajemen karyawan (admin / Sistem Kontrol)
+  employees: (token: string, query?: string) =>
+    req<ApiEmployee[]>(`/api/employees${query ? `?${query}` : ""}`, { token }),
+  createEmployee: (token: string, body: EmployeeInput) =>
+    req<{ employeeId: string }>("/api/employees", { method: "POST", token, body }),
+  updateEmployee: (token: string, id: string, body: EmployeeInput) =>
+    req<ApiEmployee>(`/api/employees/${id}`, { method: "PUT", token, body }),
+  deleteEmployee: (token: string, id: string, soft = false) =>
+    req(`/api/employees/${id}${soft ? "?soft=true" : ""}`, { method: "DELETE", token }),
+  setEmployeeCode: (token: string, id: string, format: "qr" | "barcode" = "qr") =>
+    req<{ code: string; imageUrl: string; format: string }>(
+      `/api/employees/${id}/code`, { method: "POST", token, body: { format } }),
+  resetEmployeeCode: (token: string, id: string) =>
+    req(`/api/employees/${id}/code/reset`, { method: "POST", token }),
 
   // Auth & self-service KARYAWAN (token peran 'employee', terpisah dari admin)
   employeeLogin: (employeeId: string, password: string) =>

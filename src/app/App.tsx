@@ -8,7 +8,7 @@ import {
   Smartphone, Monitor, ArrowRight, ChevronRight,
   AlertTriangle, Eye, RotateCcw, Camera, Zap
 } from "lucide-react";
-import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiPublicLocation } from "./api";
+import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiPublicLocation, type ApiEmployee, type EmployeeInput } from "./api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -428,17 +428,22 @@ function QRLokasiEmployeeApp() {
   );
 }
 
-function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRejectLeave, qrVariant, setQrVariant, qrInterval, setQrInterval }: {
+function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRejectLeave, employees, onCreateEmployee, onUpdateEmployee, onDeleteEmployee, onResetCode, qrVariant, setQrVariant, qrInterval, setQrInterval }: {
   attendance: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
   onApproveLeave: (id: string) => void;
   onRejectLeave: (id: string) => void;
+  employees: ApiEmployee[];
+  onCreateEmployee: (b: EmployeeInput) => Promise<void>;
+  onUpdateEmployee: (id: string, b: EmployeeInput) => Promise<void>;
+  onDeleteEmployee: (id: string, soft?: boolean) => Promise<void>;
+  onResetCode: (id: string) => Promise<void>;
   qrVariant: QRVariant; setQrVariant: (v: QRVariant) => void;
   qrInterval: number; setQrInterval: (n: number) => void;
 }) {
   const now = useClock();
   const { timeLeft, qrUrl, staticUrl } = useDynamicQR(qrInterval);
-  const [tab, setTab] = useState<"qr_display" | "kehadiran" | "izin_cuti">("qr_display");
+  const [tab, setTab] = useState<"qr_display" | "kehadiran" | "izin_cuti" | "karyawan">("qr_display");
 
   const stats = {
     hadir: attendance.filter(a => a.status === "hadir").length,
@@ -472,6 +477,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
             { key: "qr_display", label: "Tampilan QR", icon: <QrCode className="w-4 h-4" /> },
             { key: "kehadiran",  label: "Kehadiran",   icon: <Activity className="w-4 h-4" /> },
             { key: "izin_cuti",  label: "Izin & Cuti", icon: <FileText className="w-4 h-4" />, badge: leaveRequests.filter(l => l.status === "pending").length },
+            { key: "karyawan",   label: "Karyawan",    icon: <UserCheck className="w-4 h-4" />, badge: employees.length },
           ].map(({ key, label, icon, badge }: any) => (
             <button key={key} onClick={() => setTab(key)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${tab === key ? "bg-white/20 text-white" : "text-white/60 hover:bg-white/10 hover:text-white"}`}>
@@ -493,7 +499,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
         <div className="bg-card border-b border-border px-5 py-3 flex items-center justify-between flex-shrink-0">
           <div>
             <h1 className="font-bold text-sm">
-              {tab === "qr_display" ? "QR Code Lokasi Absensi" : tab === "kehadiran" ? "Rekap Kehadiran" : "Manajemen Izin & Cuti"}
+              {tab === "qr_display" ? "QR Code Lokasi Absensi" : tab === "kehadiran" ? "Rekap Kehadiran" : tab === "izin_cuti" ? "Manajemen Izin & Cuti" : "Kelola Karyawan"}
             </h1>
             <p className="text-xs text-muted-foreground">{fmtDate(now)}</p>
           </div>
@@ -693,7 +699,152 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
               })}
             </div>
           )}
+
+          {/* Karyawan Tab */}
+          {tab === "karyawan" && (
+            <EmployeeManagerTab employees={employees} onCreate={onCreateEmployee}
+              onUpdate={onUpdateEmployee} onDelete={onDeleteEmployee} onResetCode={onResetCode} />
+          )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Modul Kelola Karyawan (admin) — CRUD penuh ke backend (/api/employees*).
+function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCode }: {
+  employees: ApiEmployee[];
+  onCreate: (b: EmployeeInput) => Promise<void>;
+  onUpdate: (id: string, b: EmployeeInput) => Promise<void>;
+  onDelete: (id: string, soft?: boolean) => Promise<void>;
+  onResetCode: (id: string) => Promise<void>;
+}) {
+  const EMPTY: EmployeeInput = { name: "", email: "", position: "", department: "", schedule_in: "08:00", schedule_out: "17:00" };
+  const [mode, setMode] = useState<"list" | "form">("list");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<EmployeeInput>(EMPTY);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
+  const openAdd = () => { setEditId(null); setForm(EMPTY); setErr(""); setMode("form"); };
+  const openEdit = (e: ApiEmployee) => {
+    setEditId(e.employeeId);
+    setForm({ name: e.name, email: e.email ?? "", position: e.position ?? "", department: e.department ?? "",
+      schedule_in: e.schedule.in ?? "08:00", schedule_out: e.schedule.out ?? "17:00", status: e.status });
+    setErr(""); setMode("form");
+  };
+  const save = async () => {
+    if (!form.name?.trim()) { setErr("Nama wajib diisi"); return; }
+    setBusy(true); setErr("");
+    try {
+      if (editId) await onUpdate(editId, form); else await onCreate(form);
+      setMode("list");
+    } catch (e: any) { setErr(e?.message || "Gagal menyimpan"); }
+    finally { setBusy(false); }
+  };
+  const doDelete = async (id: string) => {
+    setBusy(true); setErr("");
+    try { await onDelete(id, false); setConfirmId(null); }
+    catch (e: any) { setErr(e?.message || "Gagal menghapus"); }
+    finally { setBusy(false); }
+  };
+  const doReset = async (id: string) => {
+    setBusy(true); setErr("");
+    try { await onResetCode(id); } catch (e: any) { setErr(e?.message || "Gagal reset kode"); }
+    finally { setBusy(false); }
+  };
+
+  const field = (label: string, key: keyof EmployeeInput, type = "text", placeholder = "") => (
+    <div>
+      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">{label}</label>
+      <input type={type} value={(form[key] as string) ?? ""} placeholder={placeholder}
+        onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+        className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+    </div>
+  );
+
+  if (mode === "form") return (
+    <div className="bg-card rounded-xl border border-border p-5 max-w-2xl space-y-4">
+      <p className="font-semibold text-sm">{editId ? "Edit Karyawan" : "Tambah Karyawan"}</p>
+      {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      <div className="grid grid-cols-2 gap-3">
+        {field("Nama", "name", "text", "Nama lengkap")}
+        {field("Email", "email", "email", "nama@perusahaan.co.id")}
+        {field("Posisi", "position", "text", "mis. Staff IT")}
+        {field("Departemen", "department", "text", "mis. Teknologi Informasi")}
+        {field("Jam Masuk", "schedule_in", "time")}
+        {field("Jam Keluar", "schedule_out", "time")}
+      </div>
+      {editId && (
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Status</label>
+          <select value={form.status ?? "active"} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border border-border text-sm">
+            <option value="active">Aktif</option>
+            <option value="inactive">Nonaktif</option>
+          </select>
+        </div>
+      )}
+      <div className="flex gap-2 pt-1">
+        <button disabled={busy} onClick={save} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"><Check className="w-4 h-4" />{busy ? "Menyimpan…" : "Simpan"}</button>
+        <button disabled={busy} onClick={() => setMode("list")} className="px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40">Batal</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{employees.length} karyawan terdaftar</p>
+        <button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"><UserCheck className="w-4 h-4" />Tambah Karyawan</button>
+      </div>
+      {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead><tr className="border-b border-border bg-muted/30">
+            {["Karyawan", "Departemen", "Jadwal", "Status", "Kode", "Aksi"].map(h => (
+              <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
+            ))}
+          </tr></thead>
+          <tbody className="divide-y divide-border">
+            {employees.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">Belum ada karyawan. Klik "Tambah Karyawan".</td></tr>
+            )}
+            {employees.map(e => (
+              <tr key={e.employeeId} className="hover:bg-muted/20 transition-colors">
+                <td className="px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <Avatar initials={e.name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase()} size="sm" />
+                    <div>
+                      <p className="font-semibold text-sm">{e.name}</p>
+                      <p className="text-[11px] text-muted-foreground">{e.position || "—"} · <span className="font-mono">{e.employeeId}</span></p>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-2.5"><span className="text-xs">{e.department || "—"}</span></td>
+                <td className="px-4 py-2.5"><span className="font-mono text-xs">{e.schedule.in ?? "—"}–{e.schedule.out ?? "—"}</span></td>
+                <td className="px-4 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${e.status === "active" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-muted text-muted-foreground border-border"}`}>{e.status === "active" ? "Aktif" : "Nonaktif"}</span></td>
+                <td className="px-4 py-2.5"><span className={`text-[11px] ${e.barcode ? "text-emerald-600" : "text-muted-foreground"}`}>{e.barcode ? "✓ ada" : "—"}</span></td>
+                <td className="px-4 py-2.5">
+                  {confirmId === e.employeeId ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-xs text-red-600">Hapus?</span>
+                      <button disabled={busy} onClick={() => doDelete(e.employeeId)} className="text-xs font-semibold text-red-700 hover:underline">Ya</button>
+                      <button onClick={() => setConfirmId(null)} className="text-xs text-muted-foreground hover:underline">Batal</button>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <button onClick={() => openEdit(e)} title="Edit" className="text-muted-foreground hover:text-primary"><FileText className="w-4 h-4" /></button>
+                      <button disabled={busy} onClick={() => doReset(e.employeeId)} title="Reset kode" className="text-muted-foreground hover:text-amber-600"><QrCode className="w-4 h-4" /></button>
+                      <button onClick={() => setConfirmId(e.employeeId)} title="Hapus" className="text-muted-foreground hover:text-red-600"><X className="w-4 h-4" /></button>
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1040,6 +1191,7 @@ const coversToday = (start: string, end: string, today: string) => start <= toda
 function useBackendData(enabled = true) {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [employees, setEmployees] = useState<ApiEmployee[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef<string | null>(null);
@@ -1053,7 +1205,8 @@ function useBackendData(enabled = true) {
     if (!t) return;
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const [board, leaves] = await Promise.all([api.attendance(t), api.leaves(t)]);
+      const [board, leaves, emps] = await Promise.all([api.attendance(t), api.leaves(t), api.employees(t)]);
+      setEmployees(emps);
       const lr: LeaveRequest[] = leaves.map((l: ApiLeaveRow) => ({
         id: l.requestId, employeeId: l.employeeId,
         type: l.type === "cuti" ? "cuti" : "izin",
@@ -1147,7 +1300,27 @@ function useBackendData(enabled = true) {
     await refresh();
   }, [refresh]);
 
-  return { attendance, leaveRequests, connected, error, checkIn, checkOut, approveLeave, rejectLeave };
+  // CRUD karyawan — melempar error agar form bisa menampilkannya & hanya menutup saat sukses.
+  const createEmployee = useCallback(async (body: EmployeeInput) => {
+    await api.createEmployee(tokenRef.current!, body); await refresh();
+  }, [refresh]);
+  const updateEmployee = useCallback(async (id: string, body: EmployeeInput) => {
+    await api.updateEmployee(tokenRef.current!, id, body); await refresh();
+  }, [refresh]);
+  const deleteEmployee = useCallback(async (id: string, soft = false) => {
+    await api.deleteEmployee(tokenRef.current!, id, soft);
+    codeCache.current = {}; await refresh();
+  }, [refresh]);
+  const resetEmployeeCode = useCallback(async (id: string) => {
+    await api.resetEmployeeCode(tokenRef.current!, id);
+    delete codeCache.current[id]; await refresh();
+  }, [refresh]);
+
+  return {
+    attendance, leaveRequests, employees, connected, error,
+    checkIn, checkOut, approveLeave, rejectLeave,
+    createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1238,7 +1411,8 @@ export default function App() {
 
   // Sumber kebenaran: backend Zylora (REST API). Menggantikan mock state + relay SSE.
   // Hook admin nonaktif di app-karyawan & di halaman tampilan barcode.
-  const { attendance, leaveRequests, checkIn, checkOut, approveLeave, rejectLeave } = useBackendData(!isEmployeePhone && !isDisplay);
+  const { attendance, leaveRequests, employees, checkIn, checkOut, approveLeave, rejectLeave,
+    createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode } = useBackendData(!isEmployeePhone && !isDisplay);
 
   const handleCheckIn = useCallback((empId: string) => {
     checkIn(empId, systemMode === "qr_lokasi" ? "qr_lokasi" : "terminal");
@@ -1259,6 +1433,8 @@ export default function App() {
     <div className="h-screen overflow-hidden bg-background" style={{ fontFamily: "var(--font-sans)" }}>
       <QRLokasiControlPanel attendance={attendance} leaveRequests={leaveRequests}
         onApproveLeave={approveLeave} onRejectLeave={rejectLeave}
+        employees={employees} onCreateEmployee={createEmployee} onUpdateEmployee={updateEmployee}
+        onDeleteEmployee={deleteEmployee} onResetCode={resetEmployeeCode}
         qrVariant={qrVariant} setQrVariant={setQrVariant} qrInterval={qrInterval} setQrInterval={setQrInterval} />
     </div>
   );
@@ -1340,6 +1516,8 @@ export default function App() {
             <QRLokasiEmployeeApp />
           ) : (
             <QRLokasiControlPanel attendance={attendance} leaveRequests={leaveRequests} onApproveLeave={approveLeave} onRejectLeave={rejectLeave}
+              employees={employees} onCreateEmployee={createEmployee} onUpdateEmployee={updateEmployee}
+              onDeleteEmployee={deleteEmployee} onResetCode={resetEmployeeCode}
               qrVariant={qrVariant} setQrVariant={setQrVariant} qrInterval={qrInterval} setQrInterval={setQrInterval} />
           )
         ) : (
