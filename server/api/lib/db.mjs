@@ -211,6 +211,16 @@ CREATE TABLE IF NOT EXISTS payroll_runs (
   created_at TEXT NOT NULL
 );
 
+-- Kurs / nilai tukar harian (multi-currency). 1 <currency> = <rate> IDR.
+CREATE TABLE IF NOT EXISTS exchange_rates (
+  id         TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  currency   TEXT NOT NULL,                       -- kode ISO mis. USD, EUR, SGD
+  rate       REAL NOT NULL,                        -- 1 unit currency = rate IDR
+  date       TEXT NOT NULL,                        -- YYYY-MM-DD
+  created_at TEXT NOT NULL
+);
+
 -- Slip gaji per karyawan per run (rincian disimpan JSON di kolom detail).
 CREATE TABLE IF NOT EXISTS payslips (
   id          TEXT PRIMARY KEY,

@@ -8,7 +8,7 @@ import {
   Smartphone, Monitor, ArrowRight, ChevronRight,
   AlertTriangle, Eye, RotateCcw, Camera, Zap
 } from "lucide-react";
-import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiPublicLocation, type ApiEmployee, type EmployeeInput, type ApiLocation, type LocationInput, type SalaryComponent, type PayrollRule, type PayrollRun, type Payslip } from "./api";
+import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiPublicLocation, type ApiEmployee, type EmployeeInput, type ApiLocation, type LocationInput, type SalaryComponent, type PayrollRule, type PayrollRun, type Payslip, type ExchangeRate } from "./api";
 import { Html5Qrcode } from "html5-qrcode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -558,7 +558,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
   const empName = useCallback((id: string) => employees.find(e => e.employeeId === id), [employees]);
   const initials = (name: string) => name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
   const { timeLeft, qrUrl, staticUrl } = useDynamicQR(qrInterval);
-  const [tab, setTab] = useState<"qr_display" | "kehadiran" | "izin_cuti" | "karyawan" | "lokasi" | "shift" | "perangkat" | "riwayat" | "penggajian" | "pengaturan" | "log">("qr_display");
+  const [tab, setTab] = useState<"qr_display" | "kehadiran" | "izin_cuti" | "karyawan" | "lokasi" | "shift" | "perangkat" | "riwayat" | "penggajian" | "kurs" | "pengaturan" | "log">("qr_display");
 
   // Belum login → layar login admin (ganti auto-login demo). Setelah semua hooks
   // agar tidak melanggar rules-of-hooks.
@@ -602,6 +602,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
             { key: "perangkat",  label: "Perangkat",   icon: <Smartphone className="w-4 h-4" /> },
             { key: "riwayat",    label: "Riwayat",     icon: <Calendar className="w-4 h-4" /> },
             { key: "penggajian", label: "Penggajian",  icon: <Download className="w-4 h-4" /> },
+            { key: "kurs",       label: "Kurs",        icon: <RotateCcw className="w-4 h-4" /> },
             { key: "pengaturan", label: "Pengaturan",  icon: <Building2 className="w-4 h-4" /> },
             { key: "log",        label: "Log Audit",   icon: <BarChart2 className="w-4 h-4" /> },
           ].map(({ key, label, icon, badge }: any) => (
@@ -628,7 +629,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
         <div className="bg-card border-b border-border px-5 py-3 flex items-center justify-between flex-shrink-0">
           <div>
             <h1 className="font-bold text-sm">
-              {({ qr_display: "QR Code Lokasi Absensi", kehadiran: "Rekap Kehadiran", izin_cuti: "Manajemen Izin & Cuti", karyawan: "Kelola Karyawan", lokasi: "Lokasi & QR", shift: "Shift Kerja", perangkat: "Perangkat Terdaftar", riwayat: "Riwayat Presensi", penggajian: "Penggajian", pengaturan: "Pengaturan Perusahaan", log: "Log Audit" } as Record<string, string>)[tab]}
+              {({ qr_display: "QR Code Lokasi Absensi", kehadiran: "Rekap Kehadiran", izin_cuti: "Manajemen Izin & Cuti", karyawan: "Kelola Karyawan", lokasi: "Lokasi & QR", shift: "Shift Kerja", perangkat: "Perangkat Terdaftar", riwayat: "Riwayat Presensi", penggajian: "Penggajian", kurs: "Manajemen Kurs", pengaturan: "Pengaturan Perusahaan", log: "Log Audit" } as Record<string, string>)[tab]}
             </h1>
             <p className="text-xs text-muted-foreground">{fmtDate(now)}</p>
           </div>
@@ -848,6 +849,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
           {tab === "perangkat" && <DeviceTab token={token!} employees={employees} />}
           {tab === "riwayat" && <RiwayatTab token={token!} employees={employees} />}
           {tab === "penggajian" && <PayrollTab token={token!} />}
+          {tab === "kurs" && <KursTab token={token!} />}
           {tab === "pengaturan" && <PengaturanTab token={token!} />}
           {tab === "log" && <LogTab token={token!} />}
         </div>
@@ -1326,14 +1328,25 @@ function PayrollTab({ token }: { token: string }) {
   const [msg, setMsg] = useState("");
   const [cForm, setCForm] = useState({ name: "", type: "earning", basis: "fixed", value: 0 });
   const [rForm, setRForm] = useState({ name: "", metric: "late_days", op: "gte", threshold: 0, action: "deduction", amount: 0 });
+  const [rates, setRates] = useState<ExchangeRate[]>([]);
+  const [currency, setCurrency] = useState("IDR");
   const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
 
   const load = useCallback(() => {
     api.salaryComponents(token).then(setComps).catch((e: any) => setErr(e.message));
     api.payrollRules(token).then(setRules).catch(() => {});
     api.payrollRuns(token).then(setRuns).catch(() => {});
+    api.exchangeRates(token).then(setRates).catch(() => {});
   }, [token]);
   useEffect(() => { load(); }, [load]);
+
+  // Konversi mata uang: kurs terbaru per currency (1 unit = rate IDR).
+  const latestRate: Record<string, number> = {};
+  for (const r of rates) if (!latestRate[r.currency]) latestRate[r.currency] = r.rate;
+  const fmt = (idr: number) => {
+    if (currency === "IDR" || !latestRate[currency]) return rupiah(idr);
+    return `${currency} ${(idr / latestRate[currency]).toLocaleString("id-ID", { maximumFractionDigits: 2 })}`;
+  };
 
   const addComp = async () => { if (!cForm.name.trim()) { setErr("Nama komponen wajib"); return; } setBusy(true); setErr(""); try { await api.createSalaryComponent(token, { ...cForm, value: Number(cForm.value) || 0 }); setCForm({ name: "", type: "earning", basis: "fixed", value: 0 }); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   const addRule = async () => { if (!rForm.name.trim()) { setErr("Nama aturan wajib"); return; } setBusy(true); setErr(""); try { await api.createPayrollRule(token, { ...rForm, threshold: Number(rForm.threshold) || 0, amount: Number(rForm.amount) || 0 }); setRForm({ name: "", metric: "late_days", op: "gte", threshold: 0, action: "deduction", amount: 0 }); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
@@ -1399,17 +1412,26 @@ function PayrollTab({ token }: { token: string }) {
       {/* Slip hasil run terakhir */}
       {slips && (
         <div className="bg-card rounded-xl border border-border overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-border bg-muted/30 text-sm font-semibold">Slip Gaji ({slips.length})</div>
+          <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between">
+            <span className="text-sm font-semibold">Slip Gaji ({slips.length})</span>
+            <label className="text-xs flex items-center gap-1.5 text-muted-foreground">Tampilkan dalam:
+              <select className="px-2 py-1 rounded-lg border border-border text-xs" value={currency} onChange={e => setCurrency(e.target.value)}>
+                <option value="IDR">IDR (Rp)</option>
+                {Object.keys(latestRate).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          </div>
+          {currency !== "IDR" && latestRate[currency] && <p className="px-4 pt-2 text-[11px] text-muted-foreground">Konversi kurs: 1 {currency} = {rupiah(latestRate[currency])} (transparan, dari Manajemen Kurs).</p>}
           <table className="w-full text-sm">
             <thead><tr className="border-b border-border bg-muted/20">{["Karyawan", "Pokok", "Tunjangan", "Potongan", "Net", ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-border">
               {slips.map(s => (
                 <tr key={s.id} className="hover:bg-muted/20">
                   <td className="px-4 py-2 font-semibold">{s.name}</td>
-                  <td className="px-4 py-2 font-mono">{rupiah(s.base_salary)}</td>
-                  <td className="px-4 py-2 font-mono text-emerald-600">+{rupiah(s.earnings)}</td>
-                  <td className="px-4 py-2 font-mono text-red-600">−{rupiah(s.deductions)}</td>
-                  <td className="px-4 py-2 font-mono font-bold">{rupiah(s.net)}</td>
+                  <td className="px-4 py-2 font-mono">{fmt(s.base_salary)}</td>
+                  <td className="px-4 py-2 font-mono text-emerald-600">+{fmt(s.earnings)}</td>
+                  <td className="px-4 py-2 font-mono text-red-600">−{fmt(s.deductions)}</td>
+                  <td className="px-4 py-2 font-mono font-bold">{fmt(s.net)}</td>
                   <td className="px-4 py-2"><button onClick={() => setDetail(s)} className="text-primary text-xs hover:underline">Rincian</button></td>
                 </tr>
               ))}
@@ -1439,11 +1461,65 @@ function PayrollTab({ token }: { token: string }) {
               {detail.detail && Object.entries(detail.detail.metrics).map(([k, v]) => <div key={k} className="flex justify-between"><span>{METRIC_LABEL[k] || k}</span><span className="font-mono">{v}</span></div>)}
             </div>
             <div className="border-t border-border pt-2 space-y-1 text-sm">
-              <div className="flex justify-between"><span>Gaji Pokok</span><span className="font-mono">{rupiah(detail.base_salary)}</span></div>
-              {detail.detail?.lines.map((l, i) => <div key={i} className={`flex justify-between ${l.type === "earning" ? "text-emerald-600" : "text-red-600"}`}><span>{l.name}</span><span className="font-mono">{l.type === "earning" ? "+" : "−"}{rupiah(l.amount)}</span></div>)}
-              <div className="flex justify-between font-bold border-t border-border pt-1.5 mt-1.5"><span>Gaji Bersih</span><span className="font-mono">{rupiah(detail.net)}</span></div>
+              <div className="flex justify-between"><span>Gaji Pokok</span><span className="font-mono">{fmt(detail.base_salary)}</span></div>
+              {detail.detail?.lines.map((l, i) => <div key={i} className={`flex justify-between ${l.type === "earning" ? "text-emerald-600" : "text-red-600"}`}><span>{l.name}</span><span className="font-mono">{l.type === "earning" ? "+" : "−"}{fmt(l.amount)}</span></div>)}
+              <div className="flex justify-between font-bold border-t border-border pt-1.5 mt-1.5"><span>Gaji Bersih</span><span className="font-mono">{fmt(detail.net)}</span></div>
+              {currency !== "IDR" && latestRate[currency] && <p className="text-[10px] text-muted-foreground pt-1">Kurs 1 {currency} = {rupiah(latestRate[currency])}</p>}
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Modul Manajemen Kurs (admin) — nilai tukar harian untuk konversi slip gaji.
+function KursTab({ token }: { token: string }) {
+  const [rates, setRates] = useState<ExchangeRate[]>([]);
+  const today = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState({ currency: "", rate: 0, date: today });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const load = useCallback(() => { api.exchangeRates(token).then(setRates).catch((e: any) => setErr(e.message)); }, [token]);
+  useEffect(() => { load(); }, [load]);
+  const add = async () => {
+    if (!form.currency.trim() || !(Number(form.rate) > 0)) { setErr("Kode mata uang & kurs (>0) wajib"); return; }
+    setBusy(true); setErr("");
+    try { await api.createExchangeRate(token, { currency: form.currency.toUpperCase(), rate: Number(form.rate), date: form.date }); setForm({ currency: "", rate: 0, date: today }); load(); }
+    catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const latest: Record<string, ExchangeRate> = {};
+  for (const r of rates) if (!latest[r.currency]) latest[r.currency] = r;
+  const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
+  return (
+    <div className="space-y-3 max-w-3xl">
+      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Mata Uang</label><input className={inputCls + " w-28 uppercase"} placeholder="USD" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} /></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Kurs (1 unit = Rp)</label><input type="number" className={inputCls + " w-40"} placeholder="16000" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: Number(e.target.value) }))} /></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Tanggal</label><input type="date" className={inputCls} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
+        <button disabled={busy} onClick={add} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">Simpan Kurs</button>
+      </div>
+      <p className="text-xs text-muted-foreground">Masukkan kurs resmi (mis. kurs tengah BI / mid-market). Konversi slip gaji memakai kurs terbaru per mata uang. <b>1 {form.currency || "USD"} = Rp …</b></p>
+
+      <div className="flex flex-wrap gap-2">
+        {Object.values(latest).map(r => (
+          <span key={r.currency} className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-semibold">1 {r.currency} = {rupiah(r.rate)} <span className="opacity-60 font-normal">({r.date})</span></span>
+        ))}
+        {rates.length === 0 && <p className="text-xs text-muted-foreground">Belum ada kurs.</p>}
+      </div>
+
+      {rates.length > 0 && (
+        <div className="bg-card rounded-xl border border-border overflow-hidden">
+          <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Tanggal", "Mata Uang", "Kurs (Rp)", ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+            <tbody className="divide-y divide-border">
+              {rates.map(r => (
+                <tr key={r.id} className="hover:bg-muted/20">
+                  <td className="px-4 py-2 font-mono">{r.date}</td><td className="px-4 py-2 font-semibold">{r.currency}</td><td className="px-4 py-2 font-mono">{rupiah(r.rate)}</td>
+                  <td className="px-4 py-2"><button onClick={() => api.deleteExchangeRate(token, r.id).then(load)} className="text-muted-foreground hover:text-red-600"><X className="w-3.5 h-3.5" /></button></td>
+                </tr>
+              ))}
+            </tbody></table>
         </div>
       )}
     </div>

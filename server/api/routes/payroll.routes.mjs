@@ -92,6 +92,29 @@ export function register(router) {
     }));
   });
 
+  // ── Kurs / multi-currency ──
+  router.get("/api/exchange-rates", requireControl, (ctx) => {
+    json(ctx.res, 200, all("SELECT * FROM exchange_rates WHERE company_id = ? ORDER BY date DESC, created_at DESC", ctx.auth.companyId)
+      .map((r) => ({ id: r.id, currency: r.currency, rate: r.rate, date: r.date })));
+  });
+  router.post("/api/exchange-rates", requireControl, (ctx) => {
+    const b = ctx.body;
+    requireFields(b, ["currency", "rate"]);
+    assert(Number(b.rate) > 0, 400, "rate harus > 0");
+    const id = genId("fx");
+    run("INSERT INTO exchange_rates (id, company_id, currency, rate, date, created_at) VALUES (?,?,?,?,?,?)",
+      id, ctx.auth.companyId, String(b.currency).toUpperCase().slice(0, 8), Number(b.rate),
+      /^\d{4}-\d{2}-\d{2}$/.test(b.date || "") ? b.date : nowISO().slice(0, 10), nowISO());
+    audit(ctx, "fx.create", { id });
+    json(ctx.res, 201, { id });
+  });
+  router.delete("/api/exchange-rates/:id", requireControl, (ctx) => {
+    if (!get("SELECT 1 FROM exchange_rates WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
+      throw new ApiError(404, "Kurs tidak ditemukan", "NOT_FOUND");
+    run("DELETE FROM exchange_rates WHERE id = ?", ctx.params.id);
+    noContent(ctx.res);
+  });
+
   // Slip gaji untuk satu run.
   router.get("/api/payroll/runs/:id/payslips", requireControl, (ctx) => {
     if (!get("SELECT 1 FROM payroll_runs WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))

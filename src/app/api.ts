@@ -54,6 +54,7 @@ export type EmployeeInput = {
 export type SalaryComponent = { id: string; name: string; type: "earning" | "deduction"; basis: string; value: number };
 export type PayrollRule = { id: string; name: string; metric: string; op: string; threshold: number; action: "bonus" | "deduction"; amount: number; active: boolean };
 export type PayrollRun = { runId: string; period: string; created_at: string; count: number; totalNet: number };
+export type ExchangeRate = { id: string; currency: string; rate: number; date: string };
 export type Payslip = {
   id: string; employeeId: string; name: string; period: string;
   base_salary: number; earnings: number; deductions: number; net: number;
@@ -191,6 +192,13 @@ export const api = {
     req<PayrollRun & { runId: string }>("/api/payroll/run", { method: "POST", token, body: { period } }),
   payrollRuns: (token: string) => req<PayrollRun[]>("/api/payroll/runs", { token }),
   runPayslips: (token: string, runId: string) => req<Payslip[]>(`/api/payroll/runs/${runId}/payslips`, { token }),
+
+  // Kurs / multi-currency
+  exchangeRates: (token: string) => req<ExchangeRate[]>("/api/exchange-rates", { token }),
+  createExchangeRate: (token: string, body: { currency: string; rate: number; date?: string }) =>
+    req<{ id: string }>("/api/exchange-rates", { method: "POST", token, body }),
+  deleteExchangeRate: (token: string, id: string) =>
+    req(`/api/exchange-rates/${id}`, { method: "DELETE", token }),
 
   // Auth & self-service KARYAWAN (token peran 'employee', terpisah dari admin)
   employeeLogin: (employeeId: string, password: string) =>
