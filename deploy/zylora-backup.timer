@@ -1,0 +1,12 @@
+[Unit]
+Description=Zylora API — jadwal backup DB harian
+
+[Timer]
+# Tiap hari 02:00 (waktu server), + acak ≤15 mnt agar tak menumpuk; jika server
+# mati saat jadwal, jalankan begitu menyala (Persistent).
+OnCalendar=*-*-* 02:00:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

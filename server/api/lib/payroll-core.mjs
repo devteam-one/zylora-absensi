@@ -4,6 +4,7 @@
 // (YYYY-MM), lalu menerapkan komponen gaji (tetap/berbasis) + aturan otomatis.
 // ─────────────────────────────────────────────────────────────────────────────
 import { all } from "./db.mjs";
+import { todayStr } from "./attendance-core.mjs"; // "hari ini" sadar-zona (ZYLORA_TZ), bukan UTC
 
 const toMin = (hhmm) => {
   if (!hhmm || typeof hhmm !== "string") return null;
@@ -51,7 +52,7 @@ export function computeMetrics(emp, period) {
   }
 
   // Alpa = hari kerja (Sen-Jum) sampai hari ini tanpa check-in & tanpa cuti disetujui.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
   let absent_days = 0;
   for (let day = 1; day <= dim; day++) {
     const ds = `${period}-${String(day).padStart(2, "0")}`;

@@ -10,10 +10,16 @@ API_URL="${VITE_API_URL:?Set VITE_API_URL ke URL API EC2, mis: https://api.domai
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
 
+# Kode versi monoton untuk cek update OTA (UpdateBanner). Default: jumlah commit
+# (naik tiap rilis); override via VITE_VERSION_CODE. Tanpa ini, web build = "0"
+# dan banner update tak pernah aktif.
+export VITE_VERSION_CODE="${VITE_VERSION_CODE:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
+echo "→ VITE_VERSION_CODE=$VITE_VERSION_CODE  API=$API_URL"
+
 # Vite mengekspos VITE_* dari file .env → suntik URL API lewat .env.production.local.
 cleanup() { rm -f .env.production.local; }
 trap cleanup EXIT
-printf 'VITE_API_URL=%s\n' "$API_URL" > .env.production.local
+printf 'VITE_API_URL=%s\nVITE_VERSION_CODE=%s\n' "$API_URL" "$VITE_VERSION_CODE" > .env.production.local
 
 echo "→ Build KARYAWAN  → dist-employee/  (API: $API_URL)"
 VITE_ROLE=employee npx vite build --outDir dist-employee --emptyOutDir

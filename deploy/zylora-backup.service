@@ -1,0 +1,14 @@
+[Unit]
+Description=Zylora API — backup DB SQLite (VACUUM INTO + prune)
+Documentation=file:/opt/zylora/api/tools/backup.mjs
+After=zylora-api.service
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__REMOTE_DIR__/api
+# Memuat ZYLORA_DB & ZYLORA_BACKUP_DIR & ZYLORA_BACKUP_KEEP yang sama dgn API.
+EnvironmentFile=/etc/zylora.env
+ExecStart=/usr/bin/node __REMOTE_DIR__/api/tools/backup.mjs
+NoNewPrivileges=true
+ProtectSystem=full

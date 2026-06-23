@@ -24,7 +24,9 @@ server {
 }
 
 # Catatan produksi:
-#  • Backend kini set "Access-Control-Allow-Origin: *". Untuk lebih ketat, batasi
-#    CORS ke origin frontend Anda (ubah CORS di server/api/lib/http.mjs) ATAU
-#    tangani CORS di sini dan hapus dari backend.
+#  • CORS default "*". Untuk mengunci, set ZYLORA_CORS_ORIGIN di /etc/zylora.env ke
+#    domain frontend (pisah koma), mis: ZYLORA_CORS_ORIGIN=https://absen.x.id,https://kontrol.x.id
+#  • setup-remote.sh bisa memasang blok ini otomatis: jalankan deploy dengan
+#    ZYLORA_DOMAIN=api.x.id (+ ZYLORA_LE_EMAIL=anda@x.id untuk TLS). File ini hanya
+#    rujukan bila ingin mengatur nginx secara manual.
 #  • Pastikan security group EC2 hanya membuka 80/443 ke publik, BUKAN 5181.

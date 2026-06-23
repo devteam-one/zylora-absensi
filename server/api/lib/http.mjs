@@ -3,11 +3,28 @@
 // JSON, dan helper respons. Sengaja kecil; menggantikan Express tanpa dependency.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Header CORS statis (metode/header). Asal (Allow-Origin) di-set per-request di
+// handle() lewat res.setHeader, sebab ia bergantung pada Origin pemanggil.
 const CORS = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  Vary: "Origin",
 };
+
+// Daftar asal yang diizinkan. Default "*" (kompatibel dgn 3 frontend multi-domain
+// yang sudah ter-deploy). Di PRODUKSI sebaiknya dikunci: set ZYLORA_CORS_ORIGIN
+// ke domain frontend, dipisah koma — mis. "https://absen.x.id,https://kontrol.x.id".
+const ALLOWED_ORIGINS = (process.env.ZYLORA_CORS_ORIGIN || "*")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+
+// Nilai Access-Control-Allow-Origin untuk satu request: "*" bila bebas, atau
+// pantulkan Origin yang cocok dengan whitelist (kalau tak cocok → asal pertama,
+// sehingga browser memblokir origin asing).
+function allowOriginFor(req) {
+  if (ALLOWED_ORIGINS.includes("*")) return "*";
+  const origin = req.headers?.origin;
+  return origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0] || "*";
+}
 
 // ─── Helper respons ──────────────────────────────────────────────────────────
 export function json(res, status, body) {
@@ -89,6 +106,9 @@ export function Router() {
   }
 
   async function handle(req, res) {
+    // Asal CORS per-request; persist via setHeader (writeHead nanti menggabung).
+    res.setHeader("Access-Control-Allow-Origin", allowOriginFor(req));
+
     if (req.method === "OPTIONS") {
       res.writeHead(204, CORS);
       res.end();

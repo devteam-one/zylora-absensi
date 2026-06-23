@@ -248,6 +248,18 @@ export const get = (sql, ...params) => db.prepare(sql).get(...params);
 export const all = (sql, ...params) => db.prepare(sql).all(...params);
 export const run = (sql, ...params) => db.prepare(sql).run(...params);
 
+// Bersihkan baris kedaluwarsa: sesi yang sudah revoked/lewat expires_at, dan
+// audit log lebih tua dari retensi. Tanpa ini, tabel sessions/audit_logs tumbuh
+// tanpa batas → query auth makin lambat. Dipanggil saat start + berkala.
+// expires_at & created_at disimpan ISO-8601 UTC, jadi dibanding ke UTC sekarang.
+export function cleanupExpired({ auditRetentionDays = 180 } = {}) {
+  const nowIso = new Date().toISOString();
+  const sess = run("DELETE FROM sessions WHERE revoked = 1 OR expires_at < ?", nowIso);
+  const cutoff = new Date(Date.now() - auditRetentionDays * 86_400_000).toISOString();
+  const audits = run("DELETE FROM audit_logs WHERE created_at < ?", cutoff);
+  return { sessions: sess.changes ?? 0, audits: audits.changes ?? 0 };
+}
+
 // Jalankan beberapa operasi dalam satu transaksi (rollback otomatis bila throw).
 export function tx(fn) {
   db.exec("BEGIN");

@@ -5,8 +5,12 @@ import { pick, assert } from "../lib/validate.mjs";
 import { get, run } from "../lib/db.mjs";
 import { nowISO } from "../lib/security.mjs";
 import { requireControl, audit } from "../lib/middleware.mjs";
+import { safeTz } from "../lib/attendance-core.mjs";
 
 const ATTENDANCE_MODES = ["qr_static", "qr_dynamic", "terminal_scan"];
+// Logo diterima sebagai URL atau data URL base64 di body JSON (tanpa storage).
+// Batasi agar tidak menggemukkan baris DB; body HTTP sendiri dibatasi 5MB.
+const MAX_LOGO_LEN = 2_000_000;
 
 function currentCompany(ctx) {
   const c = get("SELECT * FROM companies WHERE id = ?", ctx.auth.companyId);
@@ -53,6 +57,7 @@ export function register(router) {
   router.post("/api/company/logo", requireControl, (ctx) => {
     const url = ctx.body.logo_url || ctx.body.logo;
     assert(typeof url === "string" && url.length > 0, 400, "logo_url / logo wajib diisi");
+    assert(url.length <= MAX_LOGO_LEN, 413, "Logo terlalu besar (maks ~2MB)");
     run("UPDATE companies SET logo_url = ? WHERE id = ?", url, ctx.auth.companyId);
     audit(ctx, "company.logo");
     json(ctx.res, 200, { message: "Logo updated", logo_url: url });
@@ -73,7 +78,10 @@ export function register(router) {
     const b = ctx.body;
     const sets = [];
     const vals = [];
-    if (b.timezone !== undefined) { sets.push("timezone = ?"); vals.push(b.timezone); }
+    if (b.timezone !== undefined) {
+      assert(safeTz(b.timezone), 400, "Zona waktu tidak dikenal (pakai nama IANA, mis. Asia/Jakarta)");
+      sets.push("timezone = ?"); vals.push(b.timezone);
+    }
     if (b.language !== undefined) { sets.push("language = ?"); vals.push(b.language); }
     if (b.attendance_mode !== undefined) {
       assert(ATTENDANCE_MODES.includes(b.attendance_mode), 400,

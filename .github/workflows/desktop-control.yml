@@ -35,11 +35,16 @@ jobs:
 
       - name: Build web (Sistem Kontrol, base relatif untuk file://)
         shell: bash
+        env:
+          # Kode versi monoton untuk cek update OTA (sejajar dgn APK).
+          VITE_VERSION_CODE: ${{ github.run_number }}
         run: |
           npm install --no-audit --no-fund --legacy-peer-deps
           npm install --no-audit --no-fund react@18.3.1 react-dom@18.3.1
-          printf 'VITE_API_URL=%s\n' "$API_URL" > .env.production.local
-          VITE_ROLE=control npx vite build --base ./ --outDir desktop-app/www --emptyOutDir
+          printf 'VITE_API_URL=%s\nVITE_VERSION_CODE=%s\n' "$API_URL" "$VITE_VERSION_CODE" > .env.production.local
+          # VITE_REQUIRE_API_URL=1 → build GAGAL bila API_URL kosong (cegah diam-diam
+          # menunjuk fallback produksi saat input dispatch dikosongkan).
+          VITE_REQUIRE_API_URL=1 VITE_ROLE=control npx vite build --base ./ --outDir desktop-app/www --emptyOutDir
 
       - name: Build installer (electron-builder)
         working-directory: desktop-app

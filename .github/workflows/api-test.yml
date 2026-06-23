@@ -1,0 +1,28 @@
+name: API smoke test
+
+# Uji backend Zylora (zero-dependency, node:test). Backend butuh Node ≥ 22
+# (node:sqlite). Tak perlu install dependency — server berdiri sendiri.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/api/**"
+      - ".github/workflows/api-test.yml"
+  pull_request:
+    paths:
+      - "server/api/**"
+      - ".github/workflows/api-test.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Jalankan smoke test API
+        run: node --test server/api/test/*.mjs

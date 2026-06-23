@@ -10,6 +10,9 @@
 #   ZYLORA_EC2_USER  user SSH             (default ubuntu)
 #   ZYLORA_REMOTE_DIR direktori app       (default /opt/zylora)
 #   ZYLORA_SECRET    WAJIB: rahasia JWT kuat (mis. $(openssl rand -hex 32))
+#   ZYLORA_DOMAIN    opsional: domain API → pasang nginx otomatis (mis. api.x.id)
+#   ZYLORA_LE_EMAIL  opsional: email → TLS Let's Encrypt otomatis (butuh DOMAIN)
+#   ZYLORA_TZ        opsional: zona waktu default (default Asia/Jakarta)
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -47,14 +50,22 @@ node -e "const v=JSON.parse(require('fs').readFileSync('version.json','utf8'));l
 rsync -az --delete -e "$SSH" --exclude 'data/' \
   server/api/ "$TARGET:$REMOTE_DIR/api/"
 rsync -az -e "$SSH" \
-  deploy/setup-remote.sh deploy/zylora-api.service "$TARGET:$REMOTE_DIR/"
+  deploy/setup-remote.sh deploy/zylora-api.service \
+  deploy/zylora-backup.service deploy/zylora-backup.timer "$TARGET:$REMOTE_DIR/"
 
 echo "[4/5] Setup Node + systemd service di remote ..."
-$SSH "$TARGET" "ZYLORA_SECRET='$SECRET' REMOTE_DIR='$REMOTE_DIR' bash '$REMOTE_DIR/setup-remote.sh'"
+$SSH "$TARGET" "ZYLORA_SECRET='$SECRET' REMOTE_DIR='$REMOTE_DIR' \
+  ZYLORA_DOMAIN='${ZYLORA_DOMAIN:-}' ZYLORA_LE_EMAIL='${ZYLORA_LE_EMAIL:-}' \
+  ZYLORA_TZ='${ZYLORA_TZ:-Asia/Jakarta}' bash '$REMOTE_DIR/setup-remote.sh'"
 
 echo "[5/5] Verifikasi health (lokal di EC2) ..."
 $SSH "$TARGET" "curl -sf http://127.0.0.1:5181/health && echo"
 
 echo "✅ Deploy selesai. API berjalan sebagai service 'zylora-api' di $HOST (port 5181, bind 127.0.0.1)."
-echo "   Lihat log:  $SSH $TARGET 'journalctl -u zylora-api -f'"
-echo "   Ekspos publik: pasang nginx (deploy/nginx-zylora.conf.example) + TLS, atau buka port via security group."
+echo "   Lihat log:    $SSH $TARGET 'journalctl -u zylora-api -f'"
+echo "   Backup DB:    timer 'zylora-backup.timer' (harian) → $REMOTE_DIR/backups/"
+if [ -n "${ZYLORA_DOMAIN:-}" ]; then
+  echo "   Publik:       nginx aktif untuk ${ZYLORA_DOMAIN}${ZYLORA_LE_EMAIL:+ (TLS Lets Encrypt)}."
+else
+  echo "   Ekspos publik: set ZYLORA_DOMAIN (+ZYLORA_LE_EMAIL) agar nginx+TLS dipasang otomatis."
+fi

@@ -7,6 +7,7 @@
     "build": "vite build",
     "dev": "vite",
     "api": "node server/api/server.mjs",
+    "test:api": "node --test server/api/test/*.mjs",
     "sync": "node server/sync-server.mjs",
     "dev:employee": "VITE_ROLE=employee vite --host 127.0.0.2 --port 5173 --strictPort",
     "dev:control": "VITE_ROLE=control vite --host 127.0.0.2 --port 5174 --strictPort",

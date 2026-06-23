@@ -61,12 +61,15 @@ export function requireEmployee(ctx) {
 
 // ─── Rate-limit (fixed window, in-memory) ────────────────────────────────────
 // Cukup untuk melindungi endpoint sensitif (login/register) dari brute force.
-// Untuk multi-instance produksi, ganti store ke Redis.
+// Deploy single-instance (1 EC2) → in-memory memadai. Untuk multi-instance,
+// ganti store ke backing bersama. `by(ctx)` memberi kunci kustom (mis. per-akun
+// untuk meredam credential-stuffing yang merotasi IP); default per-IP.
 const buckets = new Map(); // key -> { count, resetAt }
 
-export function rateLimit({ max = 30, windowMs = 15 * 60 * 1000, key = "ip" } = {}) {
+export function rateLimit({ max = 30, windowMs = 15 * 60 * 1000, by } = {}) {
   return (ctx) => {
-    const id = `${key}:${ctx.ip}:${ctx.req.method}:${ctx.req.url.split("?")[0]}`;
+    const subject = by ? by(ctx) : `ip:${ctx.ip}`;
+    const id = `${ctx.req.method}:${ctx.req.url.split("?")[0]}:${subject}`;
     const now = nowMs();
     let b = buckets.get(id);
     if (!b || now > b.resetAt) {
@@ -78,6 +81,12 @@ export function rateLimit({ max = 30, windowMs = 15 * 60 * 1000, key = "ip" } = 
       throw new ApiError(429, "Terlalu banyak permintaan, coba lagi nanti", "RATE_LIMITED");
     }
   };
+}
+
+// Pembersihan berkala bucket kedaluwarsa agar Map tak tumbuh tanpa batas.
+export function sweepRateLimitBuckets() {
+  const now = nowMs();
+  for (const [k, b] of buckets) if (now > b.resetAt) buckets.delete(k);
 }
 
 // ─── Audit log ───────────────────────────────────────────────────────────────

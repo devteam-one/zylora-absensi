@@ -10,8 +10,44 @@ import { isValidDynamicToken, serialOf } from "./qr.mjs";
 import { ApiError } from "./http.mjs";
 import { assert } from "./validate.mjs";
 
-export const todayStr = () => new Date().toISOString().slice(0, 10);
-export const hhmm = () => new Date().toTimeString().slice(0, 5);
+// Tanggal & jam OPERASIONAL dihitung di ZONA WAKTU PERUSAHAAN — BUKAN UTC. Di
+// server UTC, new Date().toISOString() membuat absen pagi WIB tercatat sebagai
+// tanggal kemarin & jam keliru → status hadir/terlambat dan payroll ikut salah.
+// Zona diambil dari companies.timezone (lihat companyTz); ZYLORA_TZ jadi default
+// global bila perusahaan tak punya zona / zonanya tak dikenal.
+const DEFAULT_TZ = safeTz(process.env.ZYLORA_TZ) || "Asia/Jakarta";
+
+// Formatter di-cache per zona (pembuatan Intl relatif mahal).
+const fmtCache = new Map();
+function fmtFor(tz) {
+  let f = fmtCache.get(tz);
+  if (!f) {
+    f = {
+      date: new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }),
+      time: new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }),
+    };
+    fmtCache.set(tz, f);
+  }
+  return f;
+}
+
+// Validasi nama zona IANA; null bila tak dikenal (cegah throw saat memformat).
+export function safeTz(tz) {
+  if (!tz || typeof tz !== "string") return null;
+  try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); return tz; } catch { return null; }
+}
+
+// Zona waktu efektif sebuah perusahaan (fallback ke default global).
+export function companyTz(companyId) {
+  const row = companyId ? get("SELECT timezone FROM companies WHERE id = ?", companyId) : null;
+  return safeTz(row?.timezone) || DEFAULT_TZ;
+}
+
+// "YYYY-MM-DD" (en-CA) & "HH:MM" 24-jam (en-GB, 00–23) pada zona tertentu.
+export const todayStr = (d = new Date()) => fmtFor(DEFAULT_TZ).date.format(d);
+export const hhmm = (d = new Date()) => fmtFor(DEFAULT_TZ).time.format(d);
+export const todayStrTz = (tz, d = new Date()) => fmtFor(safeTz(tz) || DEFAULT_TZ).date.format(d);
+export const hhmmTz = (tz, d = new Date()) => fmtFor(safeTz(tz) || DEFAULT_TZ).time.format(d);
 
 // Jarak dua titik GPS dalam meter (haversine).
 export function distanceM(lat1, lng1, lat2, lng2) {
@@ -78,7 +114,8 @@ export function bumpCodeSerial(locationId) {
 
 // Catat check-in untuk satu karyawan (emp = baris penuh). Melempar 409 bila sudah.
 export function recordCheckin(emp, loc, { lat, lng, method } = {}) {
-  const date = todayStr();
+  const tz = companyTz(emp.company_id);
+  const date = todayStrTz(tz);
 
   // Tolak bila karyawan resmi cuti/izin/sakit (disetujui) pada tanggal ini:
   // tanpa ini catatan jadi kontradiktif — mis. ditandai "terlambat" padahal sah
@@ -88,7 +125,7 @@ export function recordCheckin(emp, loc, { lat, lng, method } = {}) {
     throw new ApiError(409, `Sedang ${leave.type} (disetujui) hari ini — tidak perlu absen`, "ON_LEAVE");
   }
 
-  const time = hhmm();
+  const time = hhmmTz(tz);
   const status = time > (emp.schedule_in || "08:00") ? "terlambat" : "hadir";
   const m = method === "terminal" ? "terminal" : "qr_lokasi";
 
@@ -111,10 +148,11 @@ export function recordCheckin(emp, loc, { lat, lng, method } = {}) {
 
 // Catat check-out. Melempar 409 bila belum check-in hari ini.
 export function recordCheckout(emp, loc) {
-  const date = todayStr();
+  const tz = companyTz(emp.company_id);
+  const date = todayStrTz(tz);
   const rec = get("SELECT * FROM attendance WHERE employee_id = ? AND date = ?", emp.id, date);
   if (!rec?.check_in) throw new ApiError(409, "Belum check-in hari ini", "NOT_IN");
-  const time = hhmm();
+  const time = hhmmTz(tz);
   run("UPDATE attendance SET check_out = ? WHERE id = ?", time, rec.id);
   if (loc) bumpCodeSerial(loc.id); // scan checkout → seri berganti juga
   return { employeeId: emp.id, date, check_out: time };
@@ -122,7 +160,9 @@ export function recordCheckout(emp, loc) {
 
 // Status presensi karyawan hari ini (untuk GET /api/me).
 export function todayStatus(employeeId) {
+  const emp = get("SELECT company_id FROM employees WHERE id = ?", employeeId);
+  const date = todayStrTz(companyTz(emp?.company_id));
   const rec = get("SELECT check_in, check_out, status FROM attendance WHERE employee_id = ? AND date = ?",
-    employeeId, todayStr());
+    employeeId, date);
   return rec || null;
 }

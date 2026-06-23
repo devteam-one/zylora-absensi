@@ -34,8 +34,12 @@ export function register(router) {
     json(ctx.res, 201, { adminId, companyId });
   });
 
-  // Login → JWT + catat sesi (untuk revoke saat logout).
-  router.post("/api/control/login", rateLimit({ max: 20 }), (ctx) => {
+  // Login → JWT + catat sesi (untuk revoke saat logout). Dua lapis rate-limit:
+  // per-IP (membatasi 1 sumber) + per-email (meredam serangan yang merotasi IP).
+  router.post("/api/control/login",
+    rateLimit({ max: 20 }),
+    rateLimit({ max: 10, by: (ctx) => `acct:${String(ctx.body?.email || "").trim().toLowerCase()}` }),
+    (ctx) => {
     const b = ctx.body;
     requireFields(b, ["email", "password"]);
     const admin = get("SELECT * FROM admins WHERE email = ?", b.email);

@@ -22,8 +22,12 @@ function meEmployee(ctx) {
 }
 
 export function register(router) {
-  // Login karyawan (ID + PIN/password) → token peran 'employee'.
-  router.post("/api/employee/login", rateLimit({ max: 20 }), (ctx) => {
+  // Login karyawan (ID + PIN/password) → token peran 'employee'. Rate-limit
+  // dua lapis: per-IP + per-identitas (ID/email) untuk meredam tebak-PIN.
+  router.post("/api/employee/login",
+    rateLimit({ max: 20 }),
+    rateLimit({ max: 10, by: (ctx) => `acct:${String(ctx.body?.employeeId || "").trim().toLowerCase()}` }),
+    (ctx) => {
     const b = ctx.body;
     requireFields(b, ["employeeId", "password"]);
     // Terima ID karyawan ATAU email (lebih ramah dari ID acak emp_xxx).

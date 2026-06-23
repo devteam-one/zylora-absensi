@@ -57,8 +57,9 @@ function apiUrlGuard() {
       const banner = [
         '',
         '  ⚠️  VITE_API_URL belum di-set untuk build ini.',
-        '     api.ts akan default ke http://127.0.0.2:5181 (loopback) —',
-        '     APK/desktop di perangkat lain TIDAK bisa menghubungi backend.',
+        '     api.ts akan default ke backend PRODUKSI (fallback hardcoded di',
+        '     src/app/api.ts) — build ini menunjuk ke server produksi, BUKAN',
+        '     localhost. Untuk dev lokal: VITE_API_URL=http://127.0.0.2:5181 ...',
         '     Untuk rilis: VITE_API_URL=https://api-anda <perintah build>.',
         '',
       ].join('\n')

@@ -5,8 +5,10 @@
 //  • Password  : scrypt (KDF lambat & ber-salt) → format "scrypt$salt$hash".
 //  • Token     : JWT HS256 buatan sendiri (header.payload.signature, base64url).
 //
-// Rahasia diambil dari ZYLORA_SECRET. Untuk dev ada fallback tetap supaya token
-// tidak invalid tiap restart; WAJIB di-set sendiri di produksi.
+// Rahasia diambil dari ZYLORA_SECRET (dipakai bersama oleh JWT di sini & HMAC kode
+// QR di qr.mjs — SATU sumber, di-export). Di dev ada fallback tetap + peringatan
+// keras; di PRODUKSI wajib di-set, kalau tidak server MENOLAK start — sebab
+// fallback ini publik di repo, jadi siapa pun bisa memalsukan token JWT/QR.
 // ─────────────────────────────────────────────────────────────────────────────
 import {
   randomBytes,
@@ -16,7 +18,35 @@ import {
   createHmac,
 } from "node:crypto";
 
-const SECRET = process.env.ZYLORA_SECRET || "zylora-dev-secret-change-me";
+const DEV_FALLBACK_SECRET = "zylora-dev-secret-change-me";
+const IS_PROD =
+  process.env.NODE_ENV === "production" || process.env.ZYLORA_ENV === "production";
+
+// Tentukan rahasia tanda-tangan sekali. Di produksi, ketiadaan/kelemahan rahasia
+// adalah kegagalan FATAL (exit) — bukan peringatan yang mudah terlewat di log.
+function resolveSecret() {
+  const env = process.env.ZYLORA_SECRET;
+  if (env && env !== DEV_FALLBACK_SECRET && env.length >= 16) return env;
+
+  const why = !env
+    ? "ZYLORA_SECRET belum di-set"
+    : env === DEV_FALLBACK_SECRET
+      ? "ZYLORA_SECRET masih bernilai fallback dev bawaan"
+      : "ZYLORA_SECRET terlalu pendek (minimal 16 karakter)";
+
+  if (IS_PROD) {
+    console.error(
+      `[zylora] FATAL: ${why}. Menolak start di produksi — set ZYLORA_SECRET yang kuat & acak ` +
+      `(mis. \`openssl rand -hex 32\`).`,
+    );
+    process.exit(1);
+  }
+  console.warn(`[zylora] PERINGATAN: ${why}. Memakai rahasia DEV — JANGAN dipakai di produksi.`);
+  return env || DEV_FALLBACK_SECRET;
+}
+
+// Di-export agar qr.mjs memakai rahasia yang SAMA (tak ada fallback duplikat).
+export const SECRET = resolveSecret();
 
 // ─── ID ───────────────────────────────────────────────────────────────────────
 // ID ber-prefix biar enak dibaca di log/respons: emp_xxxx, loc_xxxx, dst.

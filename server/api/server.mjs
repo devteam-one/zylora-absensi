@@ -17,6 +17,12 @@ import { dirname, join } from "node:path";
 import { Router, json } from "./lib/http.mjs";
 import { registerAll } from "./routes/index.mjs";
 import { seedIfEmpty } from "./seed.mjs";
+import { cleanupExpired } from "./lib/db.mjs";
+import { sweepRateLimitBuckets } from "./lib/middleware.mjs";
+
+const IS_PROD =
+  process.env.NODE_ENV === "production" || process.env.ZYLORA_ENV === "production";
+const AUDIT_RETENTION_DAYS = Number(process.env.ZYLORA_AUDIT_RETENTION_DAYS) || 180;
 
 const PORT = Number(process.env.ZYLORA_PORT) || 5181;
 // 127.0.0.2: konsisten dengan host dua-port frontend & sync-server.
@@ -58,10 +64,32 @@ registerAll(router);
 // karyawan & lokasi lewat Panel Kontrol. ZYLORA_SEED=1 dipakai dev/lokal saja.
 const seeded = process.env.ZYLORA_SEED === "1" ? seedIfEmpty() : null;
 if (seeded) {
-  console.log(`[zylora] seeded demo data → sistem kontrol: ${seeded.controlEmail} / ${seeded.controlPassword} · karyawan: EMP001–EMP008 / PIN ${seeded.employeePin}`);
+  // Di dev cetak kredensial demo (praktis); di produksi JANGAN bocorkan password
+  // ke log (bisa terkirim ke logging terpusat). Seed di prod memang tak dianjurkan.
+  if (IS_PROD) {
+    console.warn(`[zylora] seed demo AKTIF di produksi (ZYLORA_SEED=1) — tidak dianjurkan. Kredensial tidak dicetak; lihat seed.mjs.`);
+  } else {
+    console.log(`[zylora] seeded demo data → sistem kontrol: ${seeded.controlEmail} / ${seeded.controlPassword} · karyawan: EMP001–EMP008 / PIN ${seeded.employeePin}`);
+  }
 } else if (process.env.ZYLORA_SEED !== "1") {
   console.log("[zylora] seed demo dimatikan (set ZYLORA_SEED=1 untuk data demo).");
 }
+
+// Pembersihan housekeeping: saat start + tiap 6 jam. unref() agar tak menahan
+// proses tetap hidup saat shutdown.
+function housekeeping() {
+  try {
+    const c = cleanupExpired({ auditRetentionDays: AUDIT_RETENTION_DAYS });
+    sweepRateLimitBuckets();
+    if (c.sessions || c.audits) {
+      console.log(`[zylora] housekeeping: hapus ${c.sessions} sesi & ${c.audits} audit kedaluwarsa.`);
+    }
+  } catch (err) {
+    console.error("[zylora] housekeeping gagal:", err?.message || err);
+  }
+}
+housekeeping();
+setInterval(housekeeping, 6 * 60 * 60 * 1000).unref();
 
 const server = http.createServer((req, res) => {
   router.handle(req, res).catch((err) => {

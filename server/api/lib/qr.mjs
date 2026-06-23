@@ -10,9 +10,7 @@
 // Gambar QR memakai layanan eksternal api.qrserver.com, identik dengan prototipe.
 // ─────────────────────────────────────────────────────────────────────────────
 import { createHmac } from "node:crypto";
-import { genId, nowMs } from "./security.mjs";
-
-const SECRET = process.env.ZYLORA_SECRET || "zylora-dev-secret-change-me";
+import { genId, nowMs, SECRET } from "./security.mjs";
 
 const sig = (data) =>
   createHmac("sha256", SECRET).update(data).digest("hex").slice(0, 10).toUpperCase();
@@ -27,9 +25,15 @@ function windowIndex(interval, ms = nowMs()) {
   return Math.floor(ms / windowMs(interval));
 }
 
+// Basis layanan gambar QR. Default api.qrserver.com (seperti prototipe), TAPI
+// bisa di-arahkan ke instans self-host via ZYLORA_QR_BASE agar token tak melewati
+// pihak ketiga di produksi (mis. self-host goqr/qrserver, atau gateway internal).
+const QR_IMG_BASE = process.env.ZYLORA_QR_BASE || "https://api.qrserver.com/v1/create-qr-code/";
+
 // URL gambar QR (PNG) untuk token apa pun.
 export function qrImageUrl(token, size = 240) {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(token)}`;
+  const sep = QR_IMG_BASE.includes("?") ? "&" : "?";
+  return `${QR_IMG_BASE}${sep}size=${size}x${size}&data=${encodeURIComponent(token)}`;
 }
 
 // Token QR statis untuk sebuah lokasi — tetap selama kode belum di-regenerasi.

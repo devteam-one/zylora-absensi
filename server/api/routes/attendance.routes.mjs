@@ -5,12 +5,13 @@
 import { json } from "../lib/http.mjs";
 import { all } from "../lib/db.mjs";
 import { requireControl } from "../lib/middleware.mjs";
-import { todayStr } from "../lib/attendance-core.mjs";
+import { todayStrTz, companyTz } from "../lib/attendance-core.mjs";
 
 export function register(router) {
   // Papan presensi hari ini untuk dashboard admin (?date=YYYY-MM-DD).
   router.get("/api/attendance", requireControl, (ctx) => {
-    const date = ctx.query.date || todayStr();
+    // "Hari ini" dihitung di zona perusahaan agar cocok dengan tanggal saat dicatat.
+    const date = ctx.query.date || todayStrTz(companyTz(ctx.auth.companyId));
     const rows = all(
       `SELECT a.*, e.name AS employee_name, e.department FROM attendance a
        JOIN employees e ON e.id = a.employee_id
