@@ -42,9 +42,11 @@ jobs:
           npm install --no-audit --no-fund --legacy-peer-deps
           npm install --no-audit --no-fund react@18.3.1 react-dom@18.3.1
           printf 'VITE_API_URL=%s\nVITE_VERSION_CODE=%s\n' "$API_URL" "$VITE_VERSION_CODE" > .env.production.local
-          # VITE_REQUIRE_API_URL=1 → build GAGAL bila API_URL kosong (cegah diam-diam
-          # menunjuk fallback produksi saat input dispatch dikosongkan).
-          VITE_REQUIRE_API_URL=1 VITE_ROLE=control npx vite build --base ./ --outDir desktop-app/www --emptyOutDir
+          # VITE_API_URL diteruskan ke env PROSES (bukan cuma file .env) agar guard
+          # apiUrlGuard melihatnya; VITE_REQUIRE_API_URL=1 → build GAGAL bila kosong
+          # (cegah diam-diam menunjuk fallback produksi saat input dispatch dikosongkan).
+          VITE_API_URL="$API_URL" VITE_REQUIRE_API_URL=1 VITE_ROLE=control \
+            npx vite build --base ./ --outDir desktop-app/www --emptyOutDir
 
       - name: Build installer (electron-builder)
         working-directory: desktop-app
