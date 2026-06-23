@@ -8,15 +8,14 @@
     "dev": "vite",
     "api": "node server/api/server.mjs",
     "test:api": "node --test server/api/test/*.mjs",
-    "sync": "node server/sync-server.mjs",
     "dev:employee": "VITE_ROLE=employee vite --host 127.0.0.2 --port 5173 --strictPort",
     "dev:control": "VITE_ROLE=control vite --host 127.0.0.2 --port 5174 --strictPort",
     "dev:display": "VITE_ROLE=display vite --host 127.0.0.2 --port 5175 --strictPort",
-    "dev:2port": "node server/sync-server.mjs & VITE_ROLE=employee vite --host 127.0.0.2 --port 5173 --strictPort & VITE_ROLE=control vite --host 127.0.0.2 --port 5174 --strictPort & wait",
     "dev:zylora": "ZYLORA_SEED=1 node server/api/server.mjs & VITE_ROLE=employee vite --host 127.0.0.2 --port 5173 --strictPort & VITE_ROLE=control vite --host 127.0.0.2 --port 5174 --strictPort & wait"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
+    "@neondatabase/serverless": "1.1.0",
     "@emotion/styled": "11.14.1",
     "@mui/icons-material": "7.3.5",
     "@mui/material": "7.3.5",

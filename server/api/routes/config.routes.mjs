@@ -12,8 +12,11 @@ export function register(router) {
     json(ctx.res, 200, rows.map((s) => ({ shiftId: s.id, name: s.name, start: s.start, end: s.end })));
   });
 
+  // Jam format HH:MM. start>end DIBOLEHKAN (shift malam, mis. 22:00→06:00).
+  const HHMM = /^\d{2}:\d{2}$/;
   router.post("/api/shifts", requireControl, (ctx) => {
     requireFields(ctx.body, ["name", "start", "end"]);
+    assert(HHMM.test(ctx.body.start) && HHMM.test(ctx.body.end), 400, "start & end harus format HH:MM");
     const id = genId("shift");
     run("INSERT INTO shifts (id, company_id, name, start, end, created_at) VALUES (?,?,?,?,?,?)",
       id, ctx.auth.companyId, ctx.body.name, ctx.body.start, ctx.body.end, nowISO());
@@ -27,12 +30,23 @@ export function register(router) {
     const sets = [];
     const vals = [];
     for (const k of ["name", "start", "end"]) {
-      if (ctx.body[k] !== undefined) { sets.push(`${k} = ?`); vals.push(ctx.body[k]); }
+      if (ctx.body[k] !== undefined) {
+        if ((k === "start" || k === "end")) assert(HHMM.test(ctx.body[k]), 400, `${k} harus format HH:MM`);
+        sets.push(`${k} = ?`); vals.push(ctx.body[k]);
+      }
     }
     assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
     run(`UPDATE shifts SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.params.id);
     audit(ctx, "shift.update", { id: ctx.params.id });
     json(ctx.res, 200, { message: "Shift updated" });
+  });
+
+  router.delete("/api/shifts/:id", requireControl, (ctx) => {
+    if (!get("SELECT 1 FROM shifts WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
+      throw new ApiError(404, "Shift tidak ditemukan", "NOT_FOUND");
+    run("DELETE FROM shifts WHERE id = ?", ctx.params.id);
+    audit(ctx, "shift.delete", { id: ctx.params.id });
+    noContent(ctx.res);
   });
 
   // ── Cuti / Izin ──
@@ -82,6 +96,15 @@ export function register(router) {
     json(ctx.res, 200, { requestId: ctx.params.requestId, status });
   });
 
+  // Hapus pengajuan cuti/izin.
+  router.delete("/api/leaves/:requestId", requireControl, (ctx) => {
+    if (!get("SELECT 1 FROM leave_requests WHERE id = ? AND company_id = ?", ctx.params.requestId, ctx.auth.companyId))
+      throw new ApiError(404, "Pengajuan tidak ditemukan", "NOT_FOUND");
+    run("DELETE FROM leave_requests WHERE id = ?", ctx.params.requestId);
+    audit(ctx, "leave.delete", { requestId: ctx.params.requestId });
+    noContent(ctx.res);
+  });
+
   // ── Perangkat terdaftar (pembatasan multi-device) ──
   router.get("/api/devices", requireControl, (ctx) => {
     const rows = all("SELECT * FROM devices WHERE company_id = ? ORDER BY created_at DESC", ctx.auth.companyId);
@@ -103,6 +126,25 @@ export function register(router) {
       id, ctx.auth.companyId, b.employeeId, b.deviceId, b.label || null, nowISO());
     audit(ctx, "device.register", { id });
     json(ctx.res, 201, { id });
+  });
+
+  // Ubah label perangkat.
+  router.put("/api/devices/:id", requireControl, (ctx) => {
+    if (!get("SELECT 1 FROM devices WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
+      throw new ApiError(404, "Perangkat tidak ditemukan", "NOT_FOUND");
+    assert(ctx.body.label !== undefined, 400, "Tidak ada field yang diperbarui");
+    run("UPDATE devices SET label = ? WHERE id = ?", ctx.body.label || null, ctx.params.id);
+    audit(ctx, "device.update", { id: ctx.params.id });
+    json(ctx.res, 200, { message: "Device updated" });
+  });
+
+  // Cabut perangkat terdaftar.
+  router.delete("/api/devices/:id", requireControl, (ctx) => {
+    if (!get("SELECT 1 FROM devices WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
+      throw new ApiError(404, "Perangkat tidak ditemukan", "NOT_FOUND");
+    run("DELETE FROM devices WHERE id = ?", ctx.params.id);
+    audit(ctx, "device.delete", { id: ctx.params.id });
+    noContent(ctx.res);
   });
 
   // ── Log aktivitas admin ──

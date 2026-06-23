@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS companies (
   timezone       TEXT NOT NULL DEFAULT 'Asia/Jakarta',
   language        TEXT NOT NULL DEFAULT 'id',
   attendance_mode TEXT NOT NULL DEFAULT 'qr_dynamic',
+  base_currency  TEXT NOT NULL DEFAULT 'IDR',   -- mata uang operasional perusahaan (ISO 4217)
   created_at     TEXT NOT NULL
 );
 
@@ -212,12 +213,12 @@ CREATE TABLE IF NOT EXISTS payroll_runs (
   created_at TEXT NOT NULL
 );
 
--- Kurs / nilai tukar harian (multi-currency). 1 <currency> = <rate> IDR.
+-- Kurs / nilai tukar harian (multi-currency). 1 <currency> = <rate> <base_currency perusahaan>.
 CREATE TABLE IF NOT EXISTS exchange_rates (
   id         TEXT PRIMARY KEY,
   company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   currency   TEXT NOT NULL,                       -- kode ISO mis. USD, EUR, SGD
-  rate       REAL NOT NULL,                        -- 1 unit currency = rate IDR
+  rate       REAL NOT NULL,                        -- 1 unit currency = rate base_currency
   date       TEXT NOT NULL,                        -- YYYY-MM-DD
   created_at TEXT NOT NULL
 );
@@ -242,6 +243,9 @@ CREATE TABLE IF NOT EXISTS payslips (
 // sudah ada → diabaikan.
 try { db.exec("ALTER TABLE employees ADD COLUMN base_salary REAL NOT NULL DEFAULT 0"); } catch { /* kolom sudah ada */ }
 try { db.exec("ALTER TABLE location_codes ADD COLUMN serial INTEGER NOT NULL DEFAULT 0"); } catch { /* kolom sudah ada */ }
+// Multi-currency: mata uang operasional per-perusahaan + jejak mata uang slip gaji.
+try { db.exec("ALTER TABLE companies ADD COLUMN base_currency TEXT NOT NULL DEFAULT 'IDR'"); } catch { /* kolom sudah ada */ }
+try { db.exec("ALTER TABLE payslips ADD COLUMN currency TEXT"); } catch { /* kolom sudah ada */ }
 
 // ─── Helper kueri ─────────────────────────────────────────────────────────────
 export const get = (sql, ...params) => db.prepare(sql).get(...params);

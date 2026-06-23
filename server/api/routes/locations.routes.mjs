@@ -1,5 +1,5 @@
 // ─── 4.1. Lokasi & QR/Barcode Perusahaan ──────────────────────────────────────
-import { json, ApiError } from "../lib/http.mjs";
+import { json, noContent, ApiError } from "../lib/http.mjs";
 import { requireFields, assert } from "../lib/validate.mjs";
 import { get, all, run } from "../lib/db.mjs";
 import { genId, nowISO } from "../lib/security.mjs";
@@ -64,6 +64,40 @@ export function register(router) {
       locationId: l.id, name: l.name, address: l.address, type: l.type,
       lat: l.lat, lng: l.lng, radius_m: l.radius_m,
     })));
+  });
+
+  // Update lokasi (nama, alamat, tipe, koordinat GPS, radius).
+  router.put("/api/locations/:locationId", requireControl, (ctx) => {
+    ownedLocation(ctx, ctx.params.locationId);
+    const b = ctx.body;
+    const sets = [];
+    const vals = [];
+    for (const k of ["name", "address", "type"]) {
+      if (b[k] !== undefined) { sets.push(`${k} = ?`); vals.push(b[k]); }
+    }
+    if (b.lat !== undefined) { sets.push("lat = ?"); vals.push(b.lat === null ? null : Number(b.lat)); }
+    if (b.lng !== undefined) { sets.push("lng = ?"); vals.push(b.lng === null ? null : Number(b.lng)); }
+    if (b.radius_m !== undefined) {
+      assert(Number(b.radius_m) >= 0, 400, "radius_m tidak boleh negatif");
+      sets.push("radius_m = ?"); vals.push(Number(b.radius_m));
+    }
+    assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
+    run(`UPDATE locations SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.params.locationId);
+    audit(ctx, "location.update", { id: ctx.params.locationId });
+    const l = ownedLocation(ctx, ctx.params.locationId);
+    json(ctx.res, 200, {
+      locationId: l.id, name: l.name, address: l.address, type: l.type,
+      lat: l.lat, lng: l.lng, radius_m: l.radius_m,
+    });
+  });
+
+  // Hapus lokasi. Kode QR ikut terhapus (FK CASCADE); presensi lama tetap ada
+  // (location_id → NULL via FK SET NULL), jadi riwayat absensi tidak hilang.
+  router.delete("/api/locations/:locationId", requireControl, (ctx) => {
+    ownedLocation(ctx, ctx.params.locationId);
+    run("DELETE FROM locations WHERE id = ?", ctx.params.locationId);
+    audit(ctx, "location.delete", { id: ctx.params.locationId });
+    noContent(ctx.res);
   });
 
   // Generate QR statis (untuk dicetak & ditempel).
@@ -142,5 +176,13 @@ export function register(router) {
       newSerial, token, expires_at, nowISO(), ctx.params.codeId);
     audit(ctx, "code.refresh", { codeId: ctx.params.codeId, serial: newSerial });
     json(ctx.res, 200, { newCode: token, serial: newSerial, qrImageUrl: qrImageUrl(token), expires_at });
+  });
+
+  // Hapus kode QR/barcode sebuah lokasi.
+  router.delete("/api/locations/:locationId/codes/:codeId", requireControl, (ctx) => {
+    ownedCode(ctx, ctx.params.locationId, ctx.params.codeId);
+    run("DELETE FROM location_codes WHERE id = ?", ctx.params.codeId);
+    audit(ctx, "code.delete", { codeId: ctx.params.codeId });
+    noContent(ctx.res);
   });
 }

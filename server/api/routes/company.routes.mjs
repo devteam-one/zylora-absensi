@@ -26,6 +26,7 @@ function serialize(c) {
     contact_email: c.contact_email,
     industry: c.industry,
     logo_url: c.logo_url,
+    base_currency: c.base_currency || "IDR",
     work_hours: { start: c.work_start, end: c.work_end },
   };
 }
@@ -63,13 +64,14 @@ export function register(router) {
     json(ctx.res, 200, { message: "Logo updated", logo_url: url });
   });
 
-  // Konfigurasi aplikasi: zona waktu, mode presensi, bahasa.
+  // Konfigurasi aplikasi: zona waktu, mode presensi, bahasa, mata uang.
   router.get("/api/company/settings", requireControl, (ctx) => {
     const c = currentCompany(ctx);
     json(ctx.res, 200, {
       timezone: c.timezone,
       attendance_mode: c.attendance_mode,
       language: c.language,
+      base_currency: c.base_currency || "IDR",
     });
   });
 
@@ -88,12 +90,18 @@ export function register(router) {
         `attendance_mode harus salah satu: ${ATTENDANCE_MODES.join(", ")}`);
       sets.push("attendance_mode = ?"); vals.push(b.attendance_mode);
     }
+    if (b.base_currency !== undefined) {
+      const cur = String(b.base_currency).toUpperCase();
+      assert(/^[A-Z]{3}$/.test(cur), 400, "base_currency harus kode ISO 4217 3 huruf (IDR, USD, EUR, SGD, ...)");
+      sets.push("base_currency = ?"); vals.push(cur);
+    }
     assert(sets.length > 0, 400, "Tidak ada konfigurasi yang diperbarui");
     run(`UPDATE companies SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.auth.companyId);
     audit(ctx, "company.settings", b);
     const c = currentCompany(ctx);
     json(ctx.res, 200, {
       timezone: c.timezone, attendance_mode: c.attendance_mode, language: c.language,
+      base_currency: c.base_currency || "IDR",
     });
   });
 }

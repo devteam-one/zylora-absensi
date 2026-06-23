@@ -29,9 +29,26 @@ export type ApiPublicLocation = {
 
 export type ApiMe = {
   employeeId: string; name: string; position: string; department: string;
+  email: string | null; start_date: string | null;
   schedule: { in: string; out: string };
   code: string | null; codeImageUrl: string | null;
   today: { check_in: string | null; check_out: string | null; status: string } | null;
+};
+
+export type ApiMePayslip = {
+  period: string; base_salary: number; earnings: number; deductions: number;
+  net: number; currency: string; created_at: string;
+  detail: { metrics: Record<string, number>; lines: Array<{ name: string; type: string; basis: string; amount: number; note?: string }> } | null;
+};
+
+export type ApiMeAttendance = {
+  date: string; check_in: string | null; check_out: string | null;
+  status: string; method: string | null;
+};
+
+export type ApiMeLeave = {
+  requestId: string; type: string; start_date: string; end_date: string;
+  reason: string | null; status: string; notes: string | null; created_at: string;
 };
 
 export type ApiEmployee = {
@@ -55,10 +72,11 @@ export type EmployeeInput = {
 export type SalaryComponent = { id: string; name: string; type: "earning" | "deduction"; basis: string; value: number };
 export type PayrollRule = { id: string; name: string; metric: string; op: string; threshold: number; action: "bonus" | "deduction"; amount: number; active: boolean };
 export type PayrollRun = { runId: string; period: string; created_at: string; count: number; totalNet: number };
-export type ExchangeRate = { id: string; currency: string; rate: number; date: string };
+export type ExchangeRate = { id: string; currency: string; rate: number; base?: string; date: string };
 export type Payslip = {
   id: string; employeeId: string; name: string; period: string;
   base_salary: number; earnings: number; deductions: number; net: number;
+  currency?: string;
   detail: { metrics: Record<string, number>; lines: Array<{ name: string; type: string; basis: string; amount: number; note?: string }> } | null;
 };
 
@@ -119,6 +137,7 @@ export const api = {
     req<ApiLeaveRow[]>("/api/leaves/requests", { token }),
   approveLeave: (token: string, id: string, approved: boolean, notes?: string) =>
     req(`/api/leaves/${id}/approve`, { method: "POST", token, body: { approved, notes } }),
+  deleteLeave: (token: string, id: string) => req(`/api/leaves/${id}`, { method: "DELETE", token }),
   employeeCode: (token: string, employeeId: string) =>
     req<{ code: string; imageUrl: string; format: string }>(
       `/api/employees/${employeeId}/code`, { token }),
@@ -153,6 +172,12 @@ export const api = {
       `/api/locations/${locationId}/codes/${codeId}/refresh`, { method: "POST", token }),
   updateCode: (token: string, locationId: string, codeId: string, body: { status?: "active" | "inactive"; interval?: string }) =>
     req(`/api/locations/${locationId}/codes/${codeId}`, { method: "PUT", token, body }),
+  updateLocation: (token: string, id: string, body: LocationInput) =>
+    req<ApiLocation>(`/api/locations/${id}`, { method: "PUT", token, body }),
+  deleteLocation: (token: string, id: string) =>
+    req(`/api/locations/${id}`, { method: "DELETE", token }),
+  deleteLocationCode: (token: string, locationId: string, codeId: string) =>
+    req(`/api/locations/${locationId}/codes/${codeId}`, { method: "DELETE", token }),
 
   // Shift kerja
   shifts: (token: string) => req<Array<{ shiftId: string; name: string; start: string; end: string }>>("/api/shifts", { token }),
@@ -160,18 +185,22 @@ export const api = {
     req<{ shiftId: string }>("/api/shifts", { method: "POST", token, body }),
   updateShift: (token: string, id: string, body: { name?: string; start?: string; end?: string }) =>
     req(`/api/shifts/${id}`, { method: "PUT", token, body }),
+  deleteShift: (token: string, id: string) => req(`/api/shifts/${id}`, { method: "DELETE", token }),
 
   // Perangkat terdaftar
   devices: (token: string) => req<Array<{ id: string; employeeId: string; deviceId: string; label: string | null; created_at: string }>>("/api/devices", { token }),
   createDevice: (token: string, body: { employeeId: string; deviceId: string; label?: string }) =>
     req<{ id: string }>("/api/devices", { method: "POST", token, body }),
+  updateDevice: (token: string, id: string, body: { label?: string | null }) =>
+    req(`/api/devices/${id}`, { method: "PUT", token, body }),
+  deleteDevice: (token: string, id: string) => req(`/api/devices/${id}`, { method: "DELETE", token }),
 
   // Profil & pengaturan perusahaan
-  company: (token: string) => req<{ companyId: string; name: string; address: string | null; contact_email: string | null; industry: string | null; logo_url: string | null; work_hours: { start: string; end: string } }>("/api/company", { token }),
+  company: (token: string) => req<{ companyId: string; name: string; address: string | null; contact_email: string | null; industry: string | null; logo_url: string | null; base_currency?: string; work_hours: { start: string; end: string } }>("/api/company", { token }),
   updateCompany: (token: string, body: Record<string, unknown>) =>
     req("/api/company", { method: "PUT", token, body }),
-  companySettings: (token: string) => req<{ timezone: string; attendance_mode: string; language: string }>("/api/company/settings", { token }),
-  updateCompanySettings: (token: string, body: { timezone?: string; attendance_mode?: string; language?: string }) =>
+  companySettings: (token: string) => req<{ timezone: string; attendance_mode: string; language: string; base_currency?: string }>("/api/company/settings", { token }),
+  updateCompanySettings: (token: string, body: { timezone?: string; attendance_mode?: string; language?: string; base_currency?: string }) =>
     req("/api/company/settings", { method: "PUT", token, body }),
   setLogo: (token: string, logo_url: string) =>
     req("/api/company/logo", { method: "POST", token, body: { logo_url } }),
@@ -190,22 +219,29 @@ export const api = {
   salaryComponents: (token: string) => req<SalaryComponent[]>("/api/salary-components", { token }),
   createSalaryComponent: (token: string, body: { name: string; type: string; basis: string; value: number }) =>
     req<{ id: string }>("/api/salary-components", { method: "POST", token, body }),
+  updateSalaryComponent: (token: string, id: string, body: { name?: string; type?: string; basis?: string; value?: number }) =>
+    req(`/api/salary-components/${id}`, { method: "PUT", token, body }),
   deleteSalaryComponent: (token: string, id: string) =>
     req(`/api/salary-components/${id}`, { method: "DELETE", token }),
   payrollRules: (token: string) => req<PayrollRule[]>("/api/payroll-rules", { token }),
   createPayrollRule: (token: string, body: { name: string; metric: string; op: string; threshold: number; action: string; amount: number }) =>
     req<{ id: string }>("/api/payroll-rules", { method: "POST", token, body }),
+  updatePayrollRule: (token: string, id: string, body: { name?: string; metric?: string; op?: string; threshold?: number; action?: string; amount?: number; active?: boolean }) =>
+    req(`/api/payroll-rules/${id}`, { method: "PUT", token, body }),
   deletePayrollRule: (token: string, id: string) =>
     req(`/api/payroll-rules/${id}`, { method: "DELETE", token }),
   runPayroll: (token: string, period: string) =>
     req<PayrollRun & { runId: string }>("/api/payroll/run", { method: "POST", token, body: { period } }),
   payrollRuns: (token: string) => req<PayrollRun[]>("/api/payroll/runs", { token }),
   runPayslips: (token: string, runId: string) => req<Payslip[]>(`/api/payroll/runs/${runId}/payslips`, { token }),
+  deletePayrollRun: (token: string, runId: string) => req(`/api/payroll/runs/${runId}`, { method: "DELETE", token }),
 
   // Kurs / multi-currency
   exchangeRates: (token: string) => req<ExchangeRate[]>("/api/exchange-rates", { token }),
   createExchangeRate: (token: string, body: { currency: string; rate: number; date?: string }) =>
     req<{ id: string }>("/api/exchange-rates", { method: "POST", token, body }),
+  updateExchangeRate: (token: string, id: string, body: { currency?: string; rate?: number; date?: string }) =>
+    req(`/api/exchange-rates/${id}`, { method: "PUT", token, body }),
   deleteExchangeRate: (token: string, id: string) =>
     req(`/api/exchange-rates/${id}`, { method: "DELETE", token }),
 
@@ -220,6 +256,15 @@ export const api = {
     req<{ check_in: string; status: string; location: string }>("/api/me/checkin", { method: "POST", token, body }),
   meCheckout: (token: string, body: { location_token: string; lat?: number | null; lng?: number | null }) =>
     req<{ check_out: string }>("/api/me/checkout", { method: "POST", token, body }),
+  // Riwayat presensi & izin/cuti milik karyawan sendiri (self-service).
+  meAttendance: (token: string, q?: { start?: string; end?: string }) =>
+    req<ApiMeAttendance[]>(
+      `/api/me/attendance${q && (q.start || q.end) ? `?${new URLSearchParams(q as Record<string, string>)}` : ""}`,
+      { token }),
+  meLeaves: (token: string) => req<ApiMeLeave[]>("/api/me/leave", { token }),
+  submitLeave: (token: string, body: { type: string; start_date: string; end_date: string; reason?: string }) =>
+    req<{ requestId: string; status: string }>("/api/me/leave", { method: "POST", token, body }),
+  mePayslips: (token: string) => req<ApiMePayslip[]>("/api/me/payslips", { token }),
 
   // Publik (kiosk / app karyawan)
   publicLocation: () => req<ApiPublicLocation>("/api/public/location"),

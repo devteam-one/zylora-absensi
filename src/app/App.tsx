@@ -6,9 +6,9 @@ import {
   Building2, Timer, RefreshCw, FileText, BarChart2,
   UserCheck, UserX, Download, Activity, Wifi, WifiOff,
   Smartphone, Monitor, ArrowRight, ChevronRight,
-  AlertTriangle, Eye, RotateCcw, Camera, Zap
+  AlertTriangle, Eye, RotateCcw, Camera, Zap, Wallet, User
 } from "lucide-react";
-import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiPublicLocation, type ApiEmployee, type EmployeeInput, type ApiLocation, type LocationInput, type SalaryComponent, type PayrollRule, type PayrollRun, type Payslip, type ExchangeRate } from "./api";
+import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiMeAttendance, type ApiMeLeave, type ApiMePayslip, type ApiPublicLocation, type ApiEmployee, type EmployeeInput, type ApiLocation, type LocationInput, type SalaryComponent, type PayrollRule, type PayrollRun, type Payslip, type ExchangeRate } from "./api";
 import { Html5Qrcode } from "html5-qrcode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -123,7 +123,8 @@ function VersionTag({ className = "" }: { className?: string }) {
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: AttendanceRecord["status"] }) {
-  const c = STATUS_CFG[status];
+  // Fallback agar status tak dikenal (mis. "alpa" dari DB) tidak meng-crash render.
+  const c = STATUS_CFG[status] || { label: String(status), color: "bg-muted text-muted-foreground border-border", dot: "bg-muted-foreground" };
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${c.color}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />{c.label}
@@ -236,12 +237,38 @@ function UpdateBanner({ role }: { role: string }) {
 
 // App karyawan — MANDIRI: login sebagai karyawan (JWT peran 'employee'), bukan
 // admin. Status & check-in lewat /api/me/*; identitas dari token (tak kirim kode).
+// ── Badge kecil generik untuk app karyawan (riwayat presensi & status izin) ──
+const ATT_PILL: Record<string, { label: string; cls: string }> = {
+  hadir:     { label: "Hadir",     cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  terlambat: { label: "Terlambat", cls: "bg-amber-100 text-amber-700 border-amber-200" },
+  izin:      { label: "Izin",      cls: "bg-blue-100 text-blue-700 border-blue-200" },
+  cuti:      { label: "Cuti",      cls: "bg-purple-100 text-purple-700 border-purple-200" },
+  sakit:     { label: "Sakit",     cls: "bg-orange-100 text-orange-700 border-orange-200" },
+  alpa:      { label: "Alpa",      cls: "bg-red-100 text-red-700 border-red-200" },
+};
+const LEAVE_PILL: Record<string, { label: string; cls: string }> = {
+  pending:  { label: "Menunggu",  cls: "bg-amber-100 text-amber-700 border-amber-200" },
+  approved: { label: "Disetujui", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  rejected: { label: "Ditolak",   cls: "bg-red-100 text-red-700 border-red-200" },
+};
+function Pill({ map, value }: { map: Record<string, { label: string; cls: string }>; value: string }) {
+  const c = map[value] || { label: value, cls: "bg-muted text-muted-foreground border-border" };
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${c.cls}`}>{c.label}</span>;
+}
+// "YYYY-MM-DD" → tanggal pendek id-ID (Sen, 24 Jun). String tak valid dikembalikan apa adanya.
+function fmtDateShort(s?: string | null) {
+  if (!s) return "—";
+  const d = new Date(s + "T00:00:00");
+  return isNaN(+d) ? s : d.toLocaleDateString("id-ID", { weekday: "short", day: "numeric", month: "short" });
+}
+
 function QRLokasiEmployeeApp() {
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<ApiMe | null>(null);
-  const [loginId, setLoginId] = useState("");
+  const [loginId, setLoginId] = useState(() => { try { return localStorage.getItem("zylora.employee.id") || ""; } catch { return ""; } });
   const [loginPin, setLoginPin] = useState("");
   const [loginErr, setLoginErr] = useState("");
+  const [remember, setRemember] = useState(true); // "Ingat saya"
   const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanDone, setScanDone] = useState(false);
@@ -250,6 +277,23 @@ function QRLokasiEmployeeApp() {
   const scanForRef = useRef<null | "in" | "out">(null);
   const [locName, setLocName] = useState("Lokasi Kantor");
   const now = useClock();
+
+  // Navigasi bawah & aksi terakhir (untuk label sukses yang benar).
+  const [tab, setTab] = useState<"absen" | "riwayat" | "gaji" | "izin" | "profil">("absen");
+  const [lastAction, setLastAction] = useState<"in" | "out" | null>(null);
+  // Data self-service (lazy-load saat tab dibuka; null = belum dimuat).
+  const [history, setHistory] = useState<ApiMeAttendance[] | null>(null);
+  const [leaves, setLeaves] = useState<ApiMeLeave[] | null>(null);
+  const [payslips, setPayslips] = useState<ApiMePayslip[] | null>(null);
+  const [listBusy, setListBusy] = useState(false);
+  // Form pengajuan izin/cuti.
+  const [lvType, setLvType] = useState("cuti");
+  const [lvStart, setLvStart] = useState("");
+  const [lvEnd, setLvEnd] = useState("");
+  const [lvReason, setLvReason] = useState("");
+  const [lvBusy, setLvBusy] = useState(false);
+  const [lvErr, setLvErr] = useState("");
+  const [lvOk, setLvOk] = useState("");
 
   const loggedIn = !!token && !!me;
   const checkedIn = !!me?.today?.check_in;
@@ -271,6 +315,12 @@ function QRLokasiEmployeeApp() {
       const r = await api.employeeLogin(loginId.trim(), loginPin.trim());
       setToken(r.token);
       setMe(await api.me(r.token));
+      // "Ingat saya": simpan token + ID agar sesi pulih & ID terisi otomatis.
+      // Jika tidak, jangan simpan token (login hanya untuk sesi ini).
+      try {
+        if (remember) { localStorage.setItem("zylora.employee.token", r.token); localStorage.setItem("zylora.employee.id", loginId.trim()); }
+        else { localStorage.removeItem("zylora.employee.token"); localStorage.removeItem("zylora.employee.id"); }
+      } catch { /* abaikan */ }
       try { setLocName((await api.publicLocation()).name); } catch { /* abaikan */ }
     } catch (e: any) {
       setLoginErr(e?.message || "Login gagal");
@@ -280,7 +330,64 @@ function QRLokasiEmployeeApp() {
   const doLogout = async () => {
     if (token) { try { await api.employeeLogout(token); } catch { /* abaikan */ } }
     setToken(null); setMe(null); setLoginId(""); setLoginPin("");
+    setTab("absen"); setHistory(null); setLeaves(null); setPayslips(null); setLastAction(null);
+    try { localStorage.removeItem("zylora.employee.token"); } catch { /* abaikan */ }
   };
+
+  // Muat riwayat / izin saat tab dibuka (sekali; null = belum dimuat).
+  useEffect(() => {
+    if (!token) return;
+    if (tab === "riwayat" && history === null) {
+      setListBusy(true);
+      api.meAttendance(token).then(setHistory).catch(() => setHistory([])).finally(() => setListBusy(false));
+    }
+    if (tab === "izin" && leaves === null) {
+      setListBusy(true);
+      api.meLeaves(token).then(setLeaves).catch(() => setLeaves([])).finally(() => setListBusy(false));
+    }
+    if (tab === "gaji" && payslips === null) {
+      setListBusy(true);
+      api.mePayslips(token).then(setPayslips).catch(() => setPayslips([])).finally(() => setListBusy(false));
+    }
+  }, [tab, token, history, leaves, payslips]);
+
+  // Poll ringan status karyawan (mis. perubahan jadwal / absen dari perangkat lain).
+  // DIJEDA saat kamera/proses absen aktif agar tak mengganggu pemindaian.
+  useEffect(() => {
+    if (!token || scanFor || scanning) return;
+    const id = setInterval(() => {
+      api.me(token).then(setMe).catch(() => {});
+      if (tab === "riwayat") api.meAttendance(token).then(setHistory).catch(() => {});
+    }, 12000);
+    return () => clearInterval(id);
+  }, [token, scanFor, scanning, tab]);
+
+  // Kirim pengajuan izin/cuti.
+  const submitLeave = async () => {
+    setLvErr(""); setLvOk("");
+    if (!token) return;
+    if (!lvStart || !lvEnd) { setLvErr("Tanggal mulai & selesai wajib diisi"); return; }
+    if (lvEnd < lvStart) { setLvErr("Tanggal selesai tidak boleh sebelum tanggal mulai"); return; }
+    setLvBusy(true);
+    try {
+      await api.submitLeave(token, { type: lvType, start_date: lvStart, end_date: lvEnd, reason: lvReason.trim() || undefined });
+      setLvOk("Pengajuan terkirim, menunggu persetujuan admin.");
+      setLvStart(""); setLvEnd(""); setLvReason("");
+      setLeaves(await api.meLeaves(token));
+    } catch (e: any) {
+      setLvErr(e?.message || "Gagal mengirim pengajuan");
+    } finally { setLvBusy(false); }
+  };
+
+  // Pulihkan sesi karyawan dari token tersimpan saat refresh (validasi via /api/me).
+  useEffect(() => {
+    let saved: string | null = null;
+    try { saved = localStorage.getItem("zylora.employee.token"); } catch { /* abaikan */ }
+    if (!saved) return;
+    api.me(saved)
+      .then((m) => { setToken(saved); setMe(m); api.publicLocation().then(l => setLocName(l.name)).catch(() => {}); })
+      .catch(() => { try { localStorage.removeItem("zylora.employee.token"); } catch { /* abaikan */ } });
+  }, []);
 
   // Buka kamera untuk memindai QR lokasi (action disimpan di ref agar callback
   // scanner stabil & kamera tak restart tiap render).
@@ -291,12 +398,13 @@ function QRLokasiEmployeeApp() {
   const handleDecoded = useCallback(async (scannedToken: string) => {
     const action = scanForRef.current;
     if (!token || !action) return;
-    setScanFor(null); setScanning(true); setScanErr("");
+    setScanFor(null); setScanning(true); setScanErr(""); setLastAction(action);
     try {
       const gps = await getDeviceGps();
       if (action === "in") await api.meCheckin(token, { location_token: scannedToken, lat: gps.lat, lng: gps.lng });
       else await api.meCheckout(token, { location_token: scannedToken, lat: gps.lat, lng: gps.lng });
       setMe(await api.me(token));
+      setHistory(null); // riwayat berubah → muat ulang saat tab dibuka
       setScanDone(true);
       setTimeout(() => setScanDone(false), 2500);
     } catch (e: any) {
@@ -348,6 +456,10 @@ function QRLokasiEmployeeApp() {
                 placeholder="••••••"
                 className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-1 transition-all" />
               {loginErr && <p className="text-xs text-destructive mb-2">{loginErr}</p>}
+              <label className="flex items-center gap-2 text-xs text-muted-foreground mt-2 cursor-pointer select-none">
+                <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="accent-primary w-3.5 h-3.5" />
+                Ingat saya di perangkat ini
+              </label>
               <p className="text-[11px] text-muted-foreground mt-2">ID &amp; PIN dibuat oleh admin di Sistem Kontrol → Karyawan.</p>
               <button onClick={doLogin} disabled={!loginId.trim() || !loginPin.trim() || busy}
                 className="w-full mt-3 py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
@@ -373,6 +485,8 @@ function QRLokasiEmployeeApp() {
               </button>
             </div>
 
+            {/* ════ TAB: ABSEN (status + pemindai) ════ */}
+            {tab === "absen" && <>
             {/* Status */}
             <div className="bg-card rounded-xl border border-border p-4 flex items-center gap-3">
               <div className={`w-10 h-10 rounded-full flex items-center justify-center ${checkedIn ? "bg-emerald-100" : "bg-muted"}`}>
@@ -380,7 +494,9 @@ function QRLokasiEmployeeApp() {
               </div>
               <div>
                 <p className="font-semibold text-sm">
-                  {checkedOut ? "Absen selesai hari ini" : checkedIn ? `Check-in tercatat: ${rec?.checkIn}` : "Belum check-in"}
+                  {checkedOut
+                    ? `Masuk ${rec?.checkIn ?? "—"} · Pulang ${me?.today?.check_out ?? "—"}`
+                    : checkedIn ? `Check-in tercatat: ${rec?.checkIn}` : "Belum check-in"}
                 </p>
                 <p className="text-xs text-muted-foreground">Jadwal: {employee.scheduleIn} – {employee.scheduleOut}</p>
               </div>
@@ -398,7 +514,7 @@ function QRLokasiEmployeeApp() {
                   <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
                     className="flex flex-col items-center gap-2">
                     <CheckCircle2 className="w-16 h-16 text-accent" />
-                    <p className="text-sm font-bold text-accent">{checkedIn && !checkedOut ? "Check-Out Berhasil" : "Check-In Berhasil"}</p>
+                    <p className="text-sm font-bold text-accent">{lastAction === "out" ? "Check-Out Berhasil" : "Check-In Berhasil"}</p>
                   </motion.div>
                 ) : scanFor ? (
                   <QrScanner onDecoded={handleDecoded} onError={handleScanErr} />
@@ -457,21 +573,193 @@ function QRLokasiEmployeeApp() {
                 </div>
               )}
             </div>
+            </>}
+
+            {/* ════ TAB: RIWAYAT KEHADIRAN ════ */}
+            {tab === "riwayat" && (
+              <div className="bg-card rounded-2xl border border-border p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold">Riwayat Kehadiran</p>
+                  <button onClick={() => setHistory(null)}
+                    className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                    <RefreshCw className="w-3 h-3" />Muat ulang
+                  </button>
+                </div>
+                {listBusy && history === null ? (
+                  <p className="text-xs text-muted-foreground py-8 text-center">Memuat…</p>
+                ) : history && history.length > 0 ? (
+                  <div className="divide-y divide-border">
+                    {history.map((r) => (
+                      <div key={r.date} className="flex items-center gap-3 py-2.5">
+                        <Calendar className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold">{fmtDateShort(r.date)}</p>
+                          <p className="text-[11px] text-muted-foreground">Masuk {r.check_in ?? "—"} · Pulang {r.check_out ?? "—"}</p>
+                        </div>
+                        <div className="ml-auto"><Pill map={ATT_PILL} value={r.status} /></div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground py-8 text-center">Belum ada riwayat kehadiran.</p>
+                )}
+              </div>
+            )}
+
+            {/* ════ TAB: IZIN / CUTI ════ */}
+            {tab === "izin" && <>
+              <div className="bg-card rounded-2xl border border-border p-4">
+                <p className="text-sm font-semibold mb-3">Ajukan Izin / Cuti</p>
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  {["cuti", "izin", "sakit"].map((t) => (
+                    <button key={t} onClick={() => setLvType(t)}
+                      className={`py-2 rounded-lg text-xs font-semibold border capitalize transition-colors ${lvType === t ? "bg-primary text-white border-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}>{t}</button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Mulai</label>
+                    <input type="date" value={lvStart} onChange={(e) => setLvStart(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-input-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Selesai</label>
+                    <input type="date" value={lvEnd} min={lvStart || undefined} onChange={(e) => setLvEnd(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-input-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                  </div>
+                </div>
+                <textarea value={lvReason} onChange={(e) => setLvReason(e.target.value)} rows={2} placeholder="Alasan (opsional)"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-input-background text-sm mb-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                {lvErr && <p className="text-xs text-destructive mb-2 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{lvErr}</p>}
+                {lvOk && <p className="text-xs text-emerald-600 mb-2 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />{lvOk}</p>}
+                <button onClick={submitLeave} disabled={lvBusy || !lvStart || !lvEnd}
+                  className="w-full py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-40 flex items-center justify-center gap-2 transition-all">
+                  <Check className="w-4 h-4" />{lvBusy ? "Mengirim…" : "Ajukan"}
+                </button>
+              </div>
+              <div className="bg-card rounded-2xl border border-border p-4">
+                <p className="text-sm font-semibold mb-3">Pengajuan Saya</p>
+                {listBusy && leaves === null ? (
+                  <p className="text-xs text-muted-foreground py-6 text-center">Memuat…</p>
+                ) : leaves && leaves.length > 0 ? (
+                  <div className="divide-y divide-border">
+                    {leaves.map((l) => (
+                      <div key={l.requestId} className="py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold capitalize">{l.type}</span>
+                          <div className="ml-auto"><Pill map={LEAVE_PILL} value={l.status} /></div>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {fmtDateShort(l.start_date)} – {fmtDateShort(l.end_date)}{l.reason ? ` · ${l.reason}` : ""}
+                        </p>
+                        {l.notes && <p className="text-[11px] text-muted-foreground mt-0.5">Catatan admin: {l.notes}</p>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground py-6 text-center">Belum ada pengajuan.</p>
+                )}
+              </div>
+            </>}
+
+            {/* ════ TAB: GAJI (slip gaji milik sendiri, read-only) ════ */}
+            {tab === "gaji" && (
+              <div className="bg-card rounded-2xl border border-border p-4">
+                <p className="text-sm font-semibold mb-3">Slip Gaji Saya</p>
+                {listBusy && payslips === null ? (
+                  <p className="text-xs text-muted-foreground py-8 text-center">Memuat…</p>
+                ) : payslips && payslips.length > 0 ? (
+                  <div className="space-y-3">
+                    {payslips.map((p) => (
+                      <div key={p.period} className="rounded-xl border border-border p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-semibold">{p.period}</span>
+                          <span className="text-sm font-bold text-primary">{fmtMoney(p.net, p.currency)}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[11px]">
+                          <div className="text-muted-foreground">Pokok<br /><span className="text-foreground font-mono">{fmtMoney(p.base_salary, p.currency)}</span></div>
+                          <div className="text-muted-foreground">Tunjangan<br /><span className="text-emerald-600 font-mono">+{fmtMoney(p.earnings, p.currency)}</span></div>
+                          <div className="text-muted-foreground">Potongan<br /><span className="text-red-600 font-mono">−{fmtMoney(p.deductions, p.currency)}</span></div>
+                        </div>
+                        {p.detail?.lines && p.detail.lines.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-border space-y-0.5">
+                            {p.detail.lines.map((l, i) => (
+                              <div key={i} className={`flex justify-between text-[11px] ${l.type === "earning" ? "text-emerald-600" : "text-red-600"}`}>
+                                <span>{l.name}</span><span className="font-mono">{l.type === "earning" ? "+" : "−"}{fmtMoney(l.amount, p.currency)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground py-8 text-center">Belum ada slip gaji. Slip muncul setelah admin memproses payroll.</p>
+                )}
+              </div>
+            )}
+
+            {/* ════ TAB: PROFIL (data diri + kode personal) ════ */}
+            {tab === "profil" && (
+              <div className="space-y-4">
+                <div className="bg-card rounded-2xl border border-border p-6 flex flex-col items-center text-center">
+                  <Avatar initials={employee.avatar} size="lg" />
+                  <p className="font-bold text-base mt-3">{employee.name}</p>
+                  <p className="text-xs text-muted-foreground">{employee.position || "Karyawan"}{me?.department ? ` · ${me.department}` : ""}</p>
+                </div>
+                <div className="bg-card rounded-2xl border border-border p-4 text-sm">
+                  {([
+                    ["ID Karyawan", employee.id],
+                    ["Departemen", me?.department || "—"],
+                    ["Email", me?.email || "—"],
+                    ["Jadwal", `${employee.scheduleIn} – ${employee.scheduleOut}`],
+                    ["Tanggal Masuk", me?.start_date ? fmtDateShort(me.start_date) : "—"],
+                  ] as const).map(([k, v]) => (
+                    <div key={k} className="flex justify-between py-1.5 border-b border-border last:border-0">
+                      <span className="text-muted-foreground">{k}</span><span className="font-semibold text-right">{v}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-card rounded-2xl border border-border p-6 flex flex-col items-center text-center">
+                  <p className="text-sm font-semibold mb-2">Kode Personal</p>
+                  {me?.codeImageUrl ? (
+                    <img src={me.codeImageUrl} alt="Kode QR personal" className="w-40 h-40 rounded-xl border border-border bg-white object-contain" />
+                  ) : (
+                    <div className="w-40 h-40 rounded-xl border border-dashed border-border flex items-center justify-center text-muted-foreground"><QrCode className="w-10 h-10 opacity-30" /></div>
+                  )}
+                  {me?.code && <p className="text-[11px] font-mono text-muted-foreground mt-3 break-all px-4">{me.code}</p>}
+                  <button onClick={doLogout} className="mt-4 text-xs text-red-600 font-semibold flex items-center gap-1"><LogOut className="w-3.5 h-3.5" />Keluar akun</button>
+                </div>
+              </div>
+            )}
           </div>
         ) : null}
       </div>
+
+      {/* ════ Navigasi bawah (hanya saat login) ════ */}
+      {loggedIn && employee && (
+        <div className="flex-shrink-0 border-t border-border bg-card grid grid-cols-5">
+          {([["absen", "Absen", Scan], ["riwayat", "Riwayat", Calendar], ["gaji", "Gaji", Wallet], ["izin", "Izin", FileText], ["profil", "Profil", User]] as const).map(([key, label, Icon]) => (
+            <button key={key} onClick={() => setTab(key)}
+              className={`flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold transition-colors ${tab === key ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+              <Icon className="w-5 h-5" />{label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 // Login admin Sistem Kontrol (mengganti auto-login demo). Bisa juga daftar
 // perusahaan+admin baru (POST /api/control/register) untuk setup awal.
-function ControlLogin({ onLogin }: { onLogin: (email: string, password: string) => Promise<void> }) {
+function ControlLogin({ onLogin }: { onLogin: (email: string, password: string, remember?: boolean) => Promise<void> }) {
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => { try { return localStorage.getItem("zylora.control.email") || ""; } catch { return ""; } });
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
+  const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const submit = async () => {
@@ -481,27 +769,34 @@ function ControlLogin({ onLogin }: { onLogin: (email: string, password: string) 
     setBusy(true); setErr("");
     try {
       if (mode === "register") await api.controlRegister({ name: name.trim(), email: email.trim(), password, company_name: company.trim() });
-      await onLogin(email, password);
+      await onLogin(email, password, remember);
     } catch (e: any) { setErr(e?.message || "Gagal masuk"); setBusy(false); }
   };
   const inputCls = "w-full px-3 py-2 rounded-lg border border-border text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30";
+  const tabCls = (m: string) => `flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${mode === m ? "bg-[#1B3D72] text-white" : "text-muted-foreground hover:bg-muted/50"}`;
   return (
     <div className="h-screen flex items-center justify-center bg-[#0D1B2A] p-4" style={{ fontFamily: "var(--font-sans)" }}>
       <div className="bg-card rounded-2xl border border-border p-7 w-full max-w-sm shadow-lg">
         <div className="w-12 h-12 rounded-xl bg-[#1B3D72] flex items-center justify-center mb-5"><Shield className="w-6 h-6 text-white" /></div>
-        <h2 className="font-bold text-lg mb-1">{mode === "login" ? "Masuk Sistem Kontrol" : "Daftar Perusahaan"}</h2>
-        <p className="text-sm text-muted-foreground mb-5">{mode === "login" ? "Login admin untuk mengelola absensi." : "Buat akun admin + perusahaan baru."}</p>
+        {/* Toggle Masuk / Daftar — registrasi perusahaan jelas terlihat dari awal. */}
+        <div className="flex gap-1 p-1 mb-5 rounded-xl bg-muted/40">
+          <button onClick={() => { setMode("login"); setErr(""); }} className={tabCls("login")}>Masuk</button>
+          <button onClick={() => { setMode("register"); setErr(""); }} className={tabCls("register")}>Daftar</button>
+        </div>
+        <h2 className="font-bold text-lg mb-1">{mode === "login" ? "Masuk Sistem Kontrol" : "Daftar Perusahaan Baru"}</h2>
+        <p className="text-sm text-muted-foreground mb-5">{mode === "login" ? "Login admin untuk mengelola absensi." : "Buat akun admin + perusahaan baru, langsung dari sini."}</p>
         {err && <div className="flex items-center gap-2 p-2.5 mb-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{err}</div>}
         {mode === "register" && <>
           <input className={inputCls} placeholder="Nama admin" value={name} onChange={e => setName(e.target.value)} />
           <input className={inputCls} placeholder="Nama perusahaan (PT ...)" value={company} onChange={e => setCompany(e.target.value)} />
         </>}
         <input className={inputCls} type="email" placeholder="Email admin" value={email} onChange={e => setEmail(e.target.value)} />
-        <input className={inputCls} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
+        <input className={inputCls} type="password" placeholder={mode === "register" ? "Password (min. 8 karakter)" : "Password"} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
+        <label className="flex items-center gap-2 text-xs text-muted-foreground mb-3 cursor-pointer select-none">
+          <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="accent-[#1B3D72] w-3.5 h-3.5" />
+          Ingat saya di perangkat ini
+        </label>
         <button disabled={busy} onClick={submit} className="w-full mt-1 py-3 rounded-xl bg-[#1B3D72] text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50">{busy ? "Memproses…" : mode === "login" ? "Masuk" : "Daftar & Masuk"}</button>
-        <button onClick={() => { setMode(mode === "login" ? "register" : "login"); setErr(""); }} className="w-full mt-3 text-xs text-muted-foreground hover:text-foreground">
-          {mode === "login" ? "Belum punya akun? Daftar perusahaan baru" : "Sudah punya akun? Masuk"}
-        </button>
       </div>
     </div>
   );
@@ -903,7 +1198,7 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
         {field("Jam Keluar", "schedule_out", "time")}
       </div>
       <div>
-        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Gaji Pokok (Rp)</label>
+        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Gaji Pokok</label>
         <input type="number" value={form.base_salary ?? 0} placeholder="mis. 5000000"
           onChange={e => setForm(f => ({ ...f, base_salary: Number(e.target.value) || 0 }))}
           className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
@@ -1101,35 +1396,37 @@ function LokasiTab({ token, locations, onCreate }: {
 
 // Modul Shift kerja (admin) — CRUD ke /api/shifts.
 function ShiftTab({ token }: { token: string }) {
-  const [items, setItems] = useState<Array<{ shiftId: string; name: string; start: string; end: string }>>([]);
   const [form, setForm] = useState({ name: "", start: "08:00", end: "17:00" });
   const [editId, setEditId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const load = useCallback(() => { api.shifts(token).then(setItems).catch((e: any) => setErr(e.message)); }, [token]);
-  useEffect(() => { load(); }, [load]);
+  const dirty = editId !== null || form.name.trim() !== "";
+  const { data, error: loadErr, reload } = usePolledData(() => api.shifts(token), { paused: dirty });
+  const items = data ?? [];
+  const reset = () => { setForm({ name: "", start: "08:00", end: "17:00" }); setEditId(null); };
   const save = async () => {
     if (!form.name.trim()) { setErr("Nama shift wajib"); return; }
     setBusy(true); setErr("");
-    try { if (editId) await api.updateShift(token, editId, form); else await api.createShift(token, form); setForm({ name: "", start: "08:00", end: "17:00" }); setEditId(null); load(); }
+    try { if (editId) await api.updateShift(token, editId, form); else await api.createShift(token, form); reset(); reload(); }
     catch (e: any) { setErr(e?.message || "Gagal"); } finally { setBusy(false); }
   };
+  const del = async (id: string) => { setErr(""); try { await api.deleteShift(token, id); if (editId === id) reset(); reload(); } catch (e: any) { setErr(e?.message || "Gagal hapus"); } };
   const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
     <div className="space-y-3 max-w-2xl">
-      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
       <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
         <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Nama Shift</label><input className={inputCls} placeholder="mis. Pagi" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
         <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Mulai</label><input type="time" className={inputCls} value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value }))} /></div>
         <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Selesai</label><input type="time" className={inputCls} value={form.end} onChange={e => setForm(f => ({ ...f, end: e.target.value }))} /></div>
         <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">{editId ? "Update" : "Tambah"}</button>
-        {editId && <button onClick={() => { setEditId(null); setForm({ name: "", start: "08:00", end: "17:00" }); }} className="px-3 py-2 rounded-lg border border-border text-sm">Batal</button>}
+        {editId && <button onClick={reset} className="px-3 py-2 rounded-lg border border-border text-sm">Batal</button>}
       </div>
       <div className="bg-card rounded-xl border border-border overflow-hidden">
         <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Shift", "Mulai", "Selesai", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
           <tbody className="divide-y divide-border">
             {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground text-sm">Belum ada shift.</td></tr>}
-            {items.map(s => <tr key={s.shiftId} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{s.name}</td><td className="px-4 py-2.5 font-mono">{s.start}</td><td className="px-4 py-2.5 font-mono">{s.end}</td><td className="px-4 py-2.5"><button onClick={() => { setEditId(s.shiftId); setForm({ name: s.name, start: s.start, end: s.end }); }} className="text-primary text-xs hover:underline">Edit</button></td></tr>)}
+            {items.map(s => <tr key={s.shiftId} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{s.name}</td><td className="px-4 py-2.5 font-mono">{s.start}</td><td className="px-4 py-2.5 font-mono">{s.end}</td><td className="px-4 py-2.5 flex gap-3"><button onClick={() => { setEditId(s.shiftId); setForm({ name: s.name, start: s.start, end: s.end }); }} className="text-primary text-xs hover:underline">Edit</button><button onClick={() => del(s.shiftId)} className="text-red-600 text-xs hover:underline">Hapus</button></td></tr>)}
           </tbody></table>
       </div>
     </div>
@@ -1138,22 +1435,23 @@ function ShiftTab({ token }: { token: string }) {
 
 // Modul Perangkat terdaftar (admin) — /api/devices.
 function DeviceTab({ token, employees }: { token: string; employees: ApiEmployee[] }) {
-  const [items, setItems] = useState<Array<{ id: string; employeeId: string; deviceId: string; label: string | null }>>([]);
   const [form, setForm] = useState({ employeeId: "", deviceId: "", label: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const load = useCallback(() => { api.devices(token).then(setItems).catch((e: any) => setErr(e.message)); }, [token]);
-  useEffect(() => { load(); }, [load]);
+  const dirty = !!form.employeeId || form.deviceId.trim() !== "";
+  const { data, error: loadErr, reload } = usePolledData(() => api.devices(token), { paused: dirty });
+  const items = data ?? [];
   const save = async () => {
     if (!form.employeeId || !form.deviceId.trim()) { setErr("Karyawan & ID perangkat wajib"); return; }
     setBusy(true); setErr("");
-    try { await api.createDevice(token, form); setForm({ employeeId: "", deviceId: "", label: "" }); load(); }
+    try { await api.createDevice(token, form); setForm({ employeeId: "", deviceId: "", label: "" }); reload(); }
     catch (e: any) { setErr(e?.message || "Gagal"); } finally { setBusy(false); }
   };
+  const del = async (id: string) => { setErr(""); try { await api.deleteDevice(token, id); reload(); } catch (e: any) { setErr(e?.message || "Gagal hapus"); } };
   const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
     <div className="space-y-3 max-w-2xl">
-      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
       <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
         <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Karyawan</label>
           <select className={inputCls} value={form.employeeId} onChange={e => setForm(f => ({ ...f, employeeId: e.target.value }))}><option value="">Pilih…</option>{employees.map(e => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}</select></div>
@@ -1162,10 +1460,10 @@ function DeviceTab({ token, employees }: { token: string; employees: ApiEmployee
         <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Daftarkan</button>
       </div>
       <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Karyawan", "ID Perangkat", "Label"].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Karyawan", "ID Perangkat", "Label", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
           <tbody className="divide-y divide-border">
-            {items.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-muted-foreground text-sm">Belum ada perangkat terdaftar.</td></tr>}
-            {items.map(d => { const e = employees.find(x => x.employeeId === d.employeeId); return <tr key={d.id} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{e?.name ?? d.employeeId}</td><td className="px-4 py-2.5 font-mono text-xs">{d.deviceId}</td><td className="px-4 py-2.5">{d.label ?? "—"}</td></tr>; })}
+            {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground text-sm">Belum ada perangkat terdaftar.</td></tr>}
+            {items.map(d => { const e = employees.find(x => x.employeeId === d.employeeId); return <tr key={d.id} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{e?.name ?? d.employeeId}</td><td className="px-4 py-2.5 font-mono text-xs">{d.deviceId}</td><td className="px-4 py-2.5">{d.label ?? "—"}</td><td className="px-4 py-2.5"><button onClick={() => del(d.id)} className="text-red-600 text-xs hover:underline">Hapus</button></td></tr>; })}
           </tbody></table>
       </div>
     </div>
@@ -1259,6 +1557,12 @@ function PengaturanTab({ token }: { token: string }) {
         <div className="grid grid-cols-2 gap-3">
           <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Zona Waktu</label><input className={inputCls} value={settings.timezone ?? ""} onChange={e => setSettings({ ...settings, timezone: e.target.value })} /></div>
           <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Bahasa</label><input className={inputCls} value={settings.language ?? ""} onChange={e => setSettings({ ...settings, language: e.target.value })} /></div>
+          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Mata Uang (gaji & payroll)</label>
+            <select className={inputCls} value={settings.base_currency ?? "IDR"} onChange={e => setSettings({ ...settings, base_currency: e.target.value })}>
+              {["IDR", "USD", "EUR", "GBP", "SGD", "MYR", "JPY", "CNY", "AUD", "INR", "AED", "SAR"].map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <p className="text-[10px] text-muted-foreground mt-1">Mata uang operasional perusahaan. Semua nominal gaji/slip & label kurs mengikuti ini — bukan dipaku ke Rupiah.</p>
+          </div>
         </div>
         <button disabled={busy} onClick={saveSettings} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Simpan Pengaturan</button>
       </div>}
@@ -1272,9 +1576,8 @@ function PengaturanTab({ token }: { token: string }) {
 
 // Modul Log audit aktivitas admin (admin) — /api/logs.
 function LogTab({ token }: { token: string }) {
-  const [rows, setRows] = useState<Array<{ id: string; action: string; detail: string | null; created_at: string }>>([]);
-  const [err, setErr] = useState("");
-  useEffect(() => { api.logs(token).then(setRows).catch((e: any) => setErr(e.message)); }, [token]);
+  const { data, error: err } = usePolledData(() => api.logs(token));
+  const rows = data ?? [];
   return (
     <div className="space-y-3">
       {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
@@ -1293,12 +1596,21 @@ function LogTab({ token }: { token: string }) {
 // slip (terintegrasi absensi via /api/payroll*).
 const BASIS_LABEL: Record<string, string> = { fixed: "Tetap", percent_base: "% gaji pokok", per_late_min: "per menit telat", per_absent_day: "per hari alpa", per_overtime_hour: "per jam lembur" };
 const METRIC_LABEL: Record<string, string> = { late_days: "Hari telat", late_minutes: "Menit telat", overtime_hours: "Jam lembur", absent_days: "Hari alpa", leave_days: "Hari cuti" };
-const rupiah = (n: number) => "Rp " + (n || 0).toLocaleString("id-ID");
+// Format uang dinamis sesuai kode mata uang ISO 4217 (multi-currency — TIDAK
+// dipaku ke IDR). Locale id-ID hanya untuk pemisah ribuan; simbol & penempatan
+// otomatis dari Intl. Fallback bila kode mata uang tak dikenal.
+const ZERO_DECIMAL_CUR = ["IDR", "JPY", "KRW", "VND"];
+function fmtMoney(n: number, currency = "IDR") {
+  const v = Number.isFinite(n) ? n : 0;
+  try {
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency", currency,
+      maximumFractionDigits: ZERO_DECIMAL_CUR.includes(currency) ? 0 : 2,
+    }).format(v);
+  } catch { return `${currency} ${v.toLocaleString("id-ID")}`; }
+}
 
 function PayrollTab({ token }: { token: string }) {
-  const [comps, setComps] = useState<SalaryComponent[]>([]);
-  const [rules, setRules] = useState<PayrollRule[]>([]);
-  const [runs, setRuns] = useState<PayrollRun[]>([]);
   const [slips, setSlips] = useState<Payslip[] | null>(null);
   const [detail, setDetail] = useState<Payslip | null>(null);
   const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
@@ -1307,34 +1619,42 @@ function PayrollTab({ token }: { token: string }) {
   const [msg, setMsg] = useState("");
   const [cForm, setCForm] = useState({ name: "", type: "earning", basis: "fixed", value: 0 });
   const [rForm, setRForm] = useState({ name: "", metric: "late_days", op: "gte", threshold: 0, action: "deduction", amount: 0 });
-  const [rates, setRates] = useState<ExchangeRate[]>([]);
-  const [currency, setCurrency] = useState("IDR");
+  const [currency, setCurrency] = useState("IDR"); // mata uang TAMPILAN slip
   const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
 
-  const load = useCallback(() => {
-    api.salaryComponents(token).then(setComps).catch((e: any) => setErr(e.message));
-    api.payrollRules(token).then(setRules).catch(() => {});
-    api.payrollRuns(token).then(setRuns).catch(() => {});
-    api.exchangeRates(token).then(setRates).catch(() => {});
-  }, [token]);
-  useEffect(() => { load(); }, [load]);
+  // Satu sumber data + poll; JEDA saat form/modal terbuka (cegah input ke-reset).
+  const paused = cForm.name.trim() !== "" || rForm.name.trim() !== "" || detail !== null;
+  const { data, error: loadErr, reload } = usePolledData(
+    () => Promise.all([
+      api.salaryComponents(token),
+      api.payrollRules(token),
+      api.payrollRuns(token),
+      api.exchangeRates(token),
+      api.companySettings(token).then(s => s.base_currency || "IDR"),
+    ]),
+    { paused },
+  );
+  const [comps, rules, runs, rates, baseCur] = data ?? [[], [], [], [], "IDR"] as [SalaryComponent[], PayrollRule[], PayrollRun[], ExchangeRate[], string];
+  useEffect(() => { setCurrency(baseCur); }, [baseCur]); // default tampilan = mata uang perusahaan
 
-  // Konversi mata uang: kurs terbaru per currency (1 unit = rate IDR).
+  // Kurs terbaru per mata uang (1 unit asing = rate base_currency).
   const latestRate: Record<string, number> = {};
   for (const r of rates) if (!latestRate[r.currency]) latestRate[r.currency] = r.rate;
-  const fmt = (idr: number) => {
-    if (currency === "IDR" || !latestRate[currency]) return rupiah(idr);
-    return `${currency} ${(idr / latestRate[currency]).toLocaleString("id-ID", { maximumFractionDigits: 2 })}`;
+  // Nilai slip disimpan dalam base_currency. Tampilkan apa adanya, atau konversi
+  // ke mata uang lain yang dipilih (untuk telaah lintas-negara).
+  const fmt = (amount: number) => {
+    if (currency === baseCur || !latestRate[currency]) return fmtMoney(amount, baseCur);
+    return fmtMoney(amount / latestRate[currency], currency);
   };
 
-  const addComp = async () => { if (!cForm.name.trim()) { setErr("Nama komponen wajib"); return; } setBusy(true); setErr(""); try { await api.createSalaryComponent(token, { ...cForm, value: Number(cForm.value) || 0 }); setCForm({ name: "", type: "earning", basis: "fixed", value: 0 }); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
-  const addRule = async () => { if (!rForm.name.trim()) { setErr("Nama aturan wajib"); return; } setBusy(true); setErr(""); try { await api.createPayrollRule(token, { ...rForm, threshold: Number(rForm.threshold) || 0, amount: Number(rForm.amount) || 0 }); setRForm({ name: "", metric: "late_days", op: "gte", threshold: 0, action: "deduction", amount: 0 }); load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const addComp = async () => { if (!cForm.name.trim()) { setErr("Nama komponen wajib"); return; } setBusy(true); setErr(""); try { await api.createSalaryComponent(token, { ...cForm, value: Number(cForm.value) || 0 }); setCForm({ name: "", type: "earning", basis: "fixed", value: 0 }); reload(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const addRule = async () => { if (!rForm.name.trim()) { setErr("Nama aturan wajib"); return; } setBusy(true); setErr(""); try { await api.createPayrollRule(token, { ...rForm, threshold: Number(rForm.threshold) || 0, amount: Number(rForm.amount) || 0 }); setRForm({ name: "", metric: "late_days", op: "gte", threshold: 0, action: "deduction", amount: 0 }); reload(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   const viewSlips = async (runId: string) => { setBusy(true); setErr(""); try { setSlips(await api.runPayslips(token, runId)); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
-  const runNow = async () => { setBusy(true); setErr(""); setMsg(""); try { const r = await api.runPayroll(token, period); setMsg(`Payroll ${r.period}: ${r.count} slip · total ${rupiah(r.totalNet)}`); load(); await viewSlips(r.runId); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const runNow = async () => { setBusy(true); setErr(""); setMsg(""); try { const r = await api.runPayroll(token, period); setMsg(`Payroll ${r.period}: ${r.count} slip · total ${fmtMoney(r.totalNet, baseCur)}`); reload(); await viewSlips(r.runId); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
 
   return (
     <div className="space-y-4 max-w-4xl">
-      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
       {msg && <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5" />{msg}</div>}
 
       {/* Proses payroll */}
@@ -1359,7 +1679,7 @@ function PayrollTab({ token }: { token: string }) {
           {comps.map(c => (
             <span key={c.id} className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${c.type === "earning" ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-red-50 border-red-200 text-red-700"}`}>
               {c.name}: {c.basis === "fixed" || c.basis === "percent_base" ? c.value : c.value} <span className="opacity-60">({BASIS_LABEL[c.basis]})</span>
-              <button onClick={() => api.deleteSalaryComponent(token, c.id).then(load)} className="hover:text-foreground"><X className="w-3 h-3" /></button>
+              <button onClick={() => api.deleteSalaryComponent(token, c.id).then(reload)} className="hover:text-foreground"><X className="w-3 h-3" /></button>
             </span>
           ))}
         </div>
@@ -1374,15 +1694,15 @@ function PayrollTab({ token }: { token: string }) {
           <select className={inputCls} value={rForm.op} onChange={e => setRForm(f => ({ ...f, op: e.target.value }))}><option value="gte">≥</option><option value="gt">&gt;</option></select>
           <input type="number" className={inputCls + " w-24"} placeholder="Ambang" value={rForm.threshold} onChange={e => setRForm(f => ({ ...f, threshold: Number(e.target.value) }))} />
           <select className={inputCls} value={rForm.action} onChange={e => setRForm(f => ({ ...f, action: e.target.value }))}><option value="deduction">Potongan</option><option value="bonus">Bonus</option></select>
-          <input type="number" className={inputCls + " w-32"} placeholder="Jumlah Rp" value={rForm.amount} onChange={e => setRForm(f => ({ ...f, amount: Number(e.target.value) }))} />
+          <input type="number" className={inputCls + " w-32"} placeholder={`Jumlah (${baseCur})`} value={rForm.amount} onChange={e => setRForm(f => ({ ...f, amount: Number(e.target.value) }))} />
           <button disabled={busy} onClick={addRule} className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">Tambah</button>
         </div>
         <div className="space-y-1">
           {rules.length === 0 && <p className="text-xs text-muted-foreground">Belum ada aturan.</p>}
           {rules.map(r => (
             <div key={r.id} className="flex items-center justify-between text-xs bg-muted/30 rounded-lg px-3 py-1.5">
-              <span><b>{r.name}</b> — jika {METRIC_LABEL[r.metric]} {r.op === "gt" ? ">" : "≥"} {r.threshold} → {r.action === "bonus" ? "bonus" : "potongan"} {rupiah(r.amount)}</span>
-              <button onClick={() => api.deletePayrollRule(token, r.id).then(load)} className="text-muted-foreground hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
+              <span><b>{r.name}</b> — jika {METRIC_LABEL[r.metric]} {r.op === "gt" ? ">" : "≥"} {r.threshold} → {r.action === "bonus" ? "bonus" : "potongan"} {fmtMoney(r.amount, baseCur)}</span>
+              <button onClick={() => api.deletePayrollRule(token, r.id).then(reload)} className="text-muted-foreground hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
             </div>
           ))}
         </div>
@@ -1395,12 +1715,12 @@ function PayrollTab({ token }: { token: string }) {
             <span className="text-sm font-semibold">Slip Gaji ({slips.length})</span>
             <label className="text-xs flex items-center gap-1.5 text-muted-foreground">Tampilkan dalam:
               <select className="px-2 py-1 rounded-lg border border-border text-xs" value={currency} onChange={e => setCurrency(e.target.value)}>
-                <option value="IDR">IDR (Rp)</option>
-                {Object.keys(latestRate).map(c => <option key={c} value={c}>{c}</option>)}
+                <option value={baseCur}>{baseCur}</option>
+                {Object.keys(latestRate).filter(c => c !== baseCur).map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
           </div>
-          {currency !== "IDR" && latestRate[currency] && <p className="px-4 pt-2 text-[11px] text-muted-foreground">Konversi kurs: 1 {currency} = {rupiah(latestRate[currency])} (transparan, dari Manajemen Kurs).</p>}
+          {currency !== baseCur && latestRate[currency] && <p className="px-4 pt-2 text-[11px] text-muted-foreground">Konversi kurs: 1 {currency} = {fmtMoney(latestRate[currency], baseCur)} (transparan, dari Manajemen Kurs).</p>}
           <table className="w-full text-sm">
             <thead><tr className="border-b border-border bg-muted/20">{["Karyawan", "Pokok", "Tunjangan", "Potongan", "Net", ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-border">
@@ -1425,7 +1745,7 @@ function PayrollTab({ token }: { token: string }) {
         {runs.length === 0 && <p className="text-xs text-muted-foreground">Belum ada proses payroll.</p>}
         {runs.map(r => (
           <div key={r.runId} className="flex items-center justify-between text-xs bg-muted/30 rounded-lg px-3 py-1.5">
-            <span>Periode <b>{r.period}</b> · {r.count} slip · total {rupiah(r.totalNet)}</span>
+            <span>Periode <b>{r.period}</b> · {r.count} slip · total {fmtMoney(r.totalNet, baseCur)}</span>
             <button onClick={() => viewSlips(r.runId)} className="text-primary font-semibold hover:underline">Lihat slip</button>
           </div>
         ))}
@@ -1443,7 +1763,7 @@ function PayrollTab({ token }: { token: string }) {
               <div className="flex justify-between"><span>Gaji Pokok</span><span className="font-mono">{fmt(detail.base_salary)}</span></div>
               {detail.detail?.lines.map((l, i) => <div key={i} className={`flex justify-between ${l.type === "earning" ? "text-emerald-600" : "text-red-600"}`}><span>{l.name}</span><span className="font-mono">{l.type === "earning" ? "+" : "−"}{fmt(l.amount)}</span></div>)}
               <div className="flex justify-between font-bold border-t border-border pt-1.5 mt-1.5"><span>Gaji Bersih</span><span className="font-mono">{fmt(detail.net)}</span></div>
-              {currency !== "IDR" && latestRate[currency] && <p className="text-[10px] text-muted-foreground pt-1">Kurs 1 {currency} = {rupiah(latestRate[currency])}</p>}
+              {currency !== baseCur && latestRate[currency] && <p className="text-[10px] text-muted-foreground pt-1">Kurs 1 {currency} = {fmtMoney(latestRate[currency], baseCur)}</p>}
             </div>
           </div>
         </div>
@@ -1454,17 +1774,19 @@ function PayrollTab({ token }: { token: string }) {
 
 // Modul Manajemen Kurs (admin) — nilai tukar harian untuk konversi slip gaji.
 function KursTab({ token }: { token: string }) {
-  const [rates, setRates] = useState<ExchangeRate[]>([]);
   const today = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({ currency: "", rate: 0, date: today });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const load = useCallback(() => { api.exchangeRates(token).then(setRates).catch((e: any) => setErr(e.message)); }, [token]);
-  useEffect(() => { load(); }, [load]);
+  const dirty = form.currency.trim() !== "" || Number(form.rate) > 0;
+  const { data: ratesData, error: loadErr, reload } = usePolledData(() => api.exchangeRates(token), { paused: dirty });
+  const rates = ratesData ?? [];
+  const { data: baseCurData } = usePolledData(() => api.companySettings(token).then(s => s.base_currency || "IDR"));
+  const baseCur = baseCurData ?? "IDR"; // mata uang dasar perusahaan
   const add = async () => {
     if (!form.currency.trim() || !(Number(form.rate) > 0)) { setErr("Kode mata uang & kurs (>0) wajib"); return; }
     setBusy(true); setErr("");
-    try { await api.createExchangeRate(token, { currency: form.currency.toUpperCase(), rate: Number(form.rate), date: form.date }); setForm({ currency: "", rate: 0, date: today }); load(); }
+    try { await api.createExchangeRate(token, { currency: form.currency.toUpperCase(), rate: Number(form.rate), date: form.date }); setForm({ currency: "", rate: 0, date: today }); reload(); }
     catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   const latest: Record<string, ExchangeRate> = {};
@@ -1472,30 +1794,30 @@ function KursTab({ token }: { token: string }) {
   const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
     <div className="space-y-3 max-w-3xl">
-      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
       <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
         <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Mata Uang</label><input className={inputCls + " w-28 uppercase"} placeholder="USD" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Kurs (1 unit = Rp)</label><input type="number" className={inputCls + " w-40"} placeholder="16000" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: Number(e.target.value) }))} /></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Kurs (1 unit = {baseCur})</label><input type="number" className={inputCls + " w-40"} placeholder="16000" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: Number(e.target.value) }))} /></div>
         <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Tanggal</label><input type="date" className={inputCls} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
         <button disabled={busy} onClick={add} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">Simpan Kurs</button>
       </div>
-      <p className="text-xs text-muted-foreground">Masukkan kurs resmi (mis. kurs tengah BI / mid-market). Konversi slip gaji memakai kurs terbaru per mata uang. <b>1 {form.currency || "USD"} = Rp …</b></p>
+      <p className="text-xs text-muted-foreground">Masukkan kurs resmi (mis. kurs tengah / mid-market). Konversi slip gaji memakai kurs terbaru per mata uang, relatif terhadap mata uang dasar perusahaan. <b>1 {form.currency || "USD"} = {form.rate ? fmtMoney(Number(form.rate), baseCur) : `… ${baseCur}`}</b></p>
 
       <div className="flex flex-wrap gap-2">
         {Object.values(latest).map(r => (
-          <span key={r.currency} className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-semibold">1 {r.currency} = {rupiah(r.rate)} <span className="opacity-60 font-normal">({r.date})</span></span>
+          <span key={r.currency} className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-semibold">1 {r.currency} = {fmtMoney(r.rate, baseCur)} <span className="opacity-60 font-normal">({r.date})</span></span>
         ))}
         {rates.length === 0 && <p className="text-xs text-muted-foreground">Belum ada kurs.</p>}
       </div>
 
       {rates.length > 0 && (
         <div className="bg-card rounded-xl border border-border overflow-hidden">
-          <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Tanggal", "Mata Uang", "Kurs (Rp)", ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+          <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Tanggal", "Mata Uang", `Kurs (${baseCur})`, ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-border">
               {rates.map(r => (
                 <tr key={r.id} className="hover:bg-muted/20">
-                  <td className="px-4 py-2 font-mono">{r.date}</td><td className="px-4 py-2 font-semibold">{r.currency}</td><td className="px-4 py-2 font-mono">{rupiah(r.rate)}</td>
-                  <td className="px-4 py-2"><button onClick={() => api.deleteExchangeRate(token, r.id).then(load)} className="text-muted-foreground hover:text-red-600"><X className="w-3.5 h-3.5" /></button></td>
+                  <td className="px-4 py-2 font-mono">{r.date}</td><td className="px-4 py-2 font-semibold">{r.currency}</td><td className="px-4 py-2 font-mono">{fmtMoney(r.rate, baseCur)}</td>
+                  <td className="px-4 py-2"><button onClick={() => api.deleteExchangeRate(token, r.id).then(reload)} className="text-muted-foreground hover:text-red-600"><X className="w-3.5 h-3.5" /></button></td>
                 </tr>
               ))}
             </tbody></table>
@@ -1514,6 +1836,31 @@ function KursTab({ token }: { token: string }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const POLL_MS = 4000;
+
+// Hook data SERAGAM untuk semua tab kontrol — menggantikan pola load/useEffect/
+// setInterval yang dulu ditulis ulang di tiap tab (sumber duplikasi & refresh tak
+// konsisten). Fetch saat mount, poll berkala, `reload()` manual pasca-mutasi, dan
+// JEDA polling saat `paused` (mis. form/modal terbuka) supaya tak menimpa input
+// yang sedang diisi ("form ke-reset" / "data berubah lalu balik").
+function usePolledData<T>(fetcher: () => Promise<T>, opts: { intervalMs?: number; paused?: boolean; enabled?: boolean } = {}) {
+  const { intervalMs = POLL_MS, paused = false, enabled = true } = opts;
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState("");
+  const fRef = useRef(fetcher);
+  fRef.current = fetcher;
+  const reload = useCallback(async () => {
+    try { setData(await fRef.current()); setError(""); }
+    catch (e: any) { setError(e?.message || String(e)); }
+  }, []);
+  useEffect(() => {
+    if (!enabled) return;
+    reload();              // selalu segar saat tab dibuka
+    if (paused) return;    // jangan poll saat sedang berinteraksi (form/modal)
+    const id = setInterval(reload, intervalMs);
+    return () => clearInterval(id);
+  }, [reload, paused, enabled, intervalMs]);
+  return { data, error, reload, setData };
+}
 
 const coversToday = (start: string, end: string, today: string) => start <= today && end >= today;
 
@@ -1584,12 +1931,16 @@ function useBackendData(enabled = true) {
 
   // Login admin EKSPLISIT (form), bukan auto-login demo. Token disimpan di memori
   // (sesi); produksi bersih → admin login pakai kredensial perusahaannya sendiri.
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string, remember = true) => {
     const r = await api.controlLogin(email.trim(), password);
     tokenRef.current = r.token;
     setToken(r.token);
     setAuthed(true);
     setError(null);
+    try {
+      if (remember) { localStorage.setItem("zylora.control.token", r.token); localStorage.setItem("zylora.control.email", email.trim()); }
+      else { localStorage.removeItem("zylora.control.token"); localStorage.removeItem("zylora.control.email"); }
+    } catch { /* storage diblokir */ }
     await refresh();
   }, [refresh]);
 
@@ -1601,7 +1952,21 @@ function useBackendData(enabled = true) {
     setAuthed(false);
     setAttendance([]); setLeaveRequests([]); setEmployees([]); setLocations([]);
     codeCache.current = {};
+    try { localStorage.removeItem("zylora.control.token"); } catch { /* abaikan */ }
   }, []);
+
+  // Pulihkan sesi dari token tersimpan saat halaman di-refresh (validasi dulu;
+  // bila token kedaluwarsa/invalid → bersihkan & tetap di layar login).
+  useEffect(() => {
+    if (!enabled) return;
+    let saved: string | null = null;
+    try { saved = localStorage.getItem("zylora.control.token"); } catch { /* abaikan */ }
+    if (!saved) return;
+    tokenRef.current = saved;
+    api.company(saved)
+      .then(() => { setToken(saved); setAuthed(true); refresh(); })
+      .catch(() => { tokenRef.current = null; try { localStorage.removeItem("zylora.control.token"); } catch { /* abaikan */ } });
+  }, [enabled, refresh]);
 
   // Polling hanya setelah login.
   useEffect(() => {

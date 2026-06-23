@@ -26,6 +26,21 @@ export function register(router) {
     audit(ctx, "salary_component.create", { id });
     json(ctx.res, 201, { id });
   });
+  router.put("/api/salary-components/:id", requireControl, (ctx) => {
+    if (!get("SELECT 1 FROM salary_components WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
+      throw new ApiError(404, "Komponen tidak ditemukan", "NOT_FOUND");
+    const b = ctx.body;
+    const sets = [];
+    const vals = [];
+    if (b.name !== undefined) { sets.push("name = ?"); vals.push(b.name); }
+    if (b.type !== undefined) { assert(["earning", "deduction"].includes(b.type), 400, "type: earning|deduction"); sets.push("type = ?"); vals.push(b.type); }
+    if (b.basis !== undefined) { assert(BASES.includes(b.basis), 400, `basis: ${BASES.join("|")}`); sets.push("basis = ?"); vals.push(b.basis); }
+    if (b.value !== undefined) { sets.push("value = ?"); vals.push(Number(b.value) || 0); }
+    assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
+    run(`UPDATE salary_components SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.params.id);
+    audit(ctx, "salary_component.update", { id: ctx.params.id });
+    json(ctx.res, 200, { message: "Component updated" });
+  });
   router.delete("/api/salary-components/:id", requireControl, (ctx) => {
     if (!get("SELECT 1 FROM salary_components WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
       throw new ApiError(404, "Komponen tidak ditemukan", "NOT_FOUND");
@@ -50,6 +65,24 @@ export function register(router) {
     audit(ctx, "payroll_rule.create", { id });
     json(ctx.res, 201, { id });
   });
+  router.put("/api/payroll-rules/:id", requireControl, (ctx) => {
+    if (!get("SELECT 1 FROM payroll_rules WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
+      throw new ApiError(404, "Aturan tidak ditemukan", "NOT_FOUND");
+    const b = ctx.body;
+    const sets = [];
+    const vals = [];
+    if (b.name !== undefined) { sets.push("name = ?"); vals.push(b.name); }
+    if (b.metric !== undefined) { assert(METRICS.includes(b.metric), 400, `metric: ${METRICS.join("|")}`); sets.push("metric = ?"); vals.push(b.metric); }
+    if (b.op !== undefined) { sets.push("op = ?"); vals.push(b.op === "gt" ? "gt" : "gte"); }
+    if (b.threshold !== undefined) { sets.push("threshold = ?"); vals.push(Number(b.threshold) || 0); }
+    if (b.action !== undefined) { assert(["bonus", "deduction"].includes(b.action), 400, "action: bonus|deduction"); sets.push("action = ?"); vals.push(b.action); }
+    if (b.amount !== undefined) { sets.push("amount = ?"); vals.push(Number(b.amount) || 0); }
+    if (b.active !== undefined) { sets.push("active = ?"); vals.push(b.active ? 1 : 0); }
+    assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
+    run(`UPDATE payroll_rules SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.params.id);
+    audit(ctx, "payroll_rule.update", { id: ctx.params.id });
+    json(ctx.res, 200, { message: "Rule updated" });
+  });
   router.delete("/api/payroll-rules/:id", requireControl, (ctx) => {
     if (!get("SELECT 1 FROM payroll_rules WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
       throw new ApiError(404, "Aturan tidak ditemukan", "NOT_FOUND");
@@ -65,6 +98,7 @@ export function register(router) {
     const comps = all("SELECT * FROM salary_components WHERE company_id = ?", ctx.auth.companyId);
     const rules = all("SELECT * FROM payroll_rules WHERE company_id = ? AND active = 1", ctx.auth.companyId);
     const emps = all("SELECT * FROM employees WHERE company_id = ? AND status = 'active'", ctx.auth.companyId);
+    const baseCur = get("SELECT base_currency FROM companies WHERE id = ?", ctx.auth.companyId)?.base_currency || "IDR";
     const runId = genId("run");
     const ts = nowISO();
     const slips = [];
@@ -73,9 +107,10 @@ export function register(router) {
         runId, ctx.auth.companyId, period, ctx.auth.operatorId || null, ts);
       for (const e of emps) {
         const ps = computePayslip(e, period, comps, rules);
-        run("INSERT INTO payslips (id, run_id, company_id, employee_id, period, base_salary, earnings, deductions, net, detail, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        // Slip dihitung & disimpan dalam mata uang operasional perusahaan (baseCur).
+        run("INSERT INTO payslips (id, run_id, company_id, employee_id, period, base_salary, earnings, deductions, net, detail, currency, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
           genId("slip"), runId, ctx.auth.companyId, e.id, period, ps.base_salary, ps.earnings, ps.deductions, ps.net,
-          JSON.stringify({ metrics: ps.metrics, lines: ps.lines }), ts);
+          JSON.stringify({ metrics: ps.metrics, lines: ps.lines }), baseCur, ts);
         slips.push({ employeeId: e.id, name: e.name, net: ps.net });
       }
     });
@@ -92,26 +127,57 @@ export function register(router) {
     }));
   });
 
+  // Hapus satu proses payroll (slip gaji ikut terhapus via FK CASCADE).
+  router.delete("/api/payroll/runs/:id", requireControl, (ctx) => {
+    if (!get("SELECT 1 FROM payroll_runs WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
+      throw new ApiError(404, "Run tidak ditemukan", "NOT_FOUND");
+    run("DELETE FROM payroll_runs WHERE id = ?", ctx.params.id);
+    audit(ctx, "payroll.run.delete", { id: ctx.params.id });
+    noContent(ctx.res);
+  });
+
   // ── Kurs / multi-currency ──
   router.get("/api/exchange-rates", requireControl, (ctx) => {
+    const base = get("SELECT base_currency FROM companies WHERE id = ?", ctx.auth.companyId)?.base_currency || "IDR";
     json(ctx.res, 200, all("SELECT * FROM exchange_rates WHERE company_id = ? ORDER BY date DESC, created_at DESC", ctx.auth.companyId)
-      .map((r) => ({ id: r.id, currency: r.currency, rate: r.rate, date: r.date })));
+      .map((r) => ({ id: r.id, currency: r.currency, rate: r.rate, base, date: r.date })));
   });
   router.post("/api/exchange-rates", requireControl, (ctx) => {
     const b = ctx.body;
     requireFields(b, ["currency", "rate"]);
+    const cur = String(b.currency).toUpperCase().trim();
+    assert(/^[A-Z]{3}$/.test(cur), 400, "currency harus kode ISO 4217 3 huruf (USD, EUR, SGD, ...)");
     assert(Number(b.rate) > 0, 400, "rate harus > 0");
     const id = genId("fx");
     run("INSERT INTO exchange_rates (id, company_id, currency, rate, date, created_at) VALUES (?,?,?,?,?,?)",
-      id, ctx.auth.companyId, String(b.currency).toUpperCase().slice(0, 8), Number(b.rate),
+      id, ctx.auth.companyId, cur, Number(b.rate),
       /^\d{4}-\d{2}-\d{2}$/.test(b.date || "") ? b.date : nowISO().slice(0, 10), nowISO());
     audit(ctx, "fx.create", { id });
     json(ctx.res, 201, { id });
+  });
+  router.put("/api/exchange-rates/:id", requireControl, (ctx) => {
+    if (!get("SELECT 1 FROM exchange_rates WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
+      throw new ApiError(404, "Kurs tidak ditemukan", "NOT_FOUND");
+    const b = ctx.body;
+    const sets = [];
+    const vals = [];
+    if (b.currency !== undefined) {
+      const cur = String(b.currency).toUpperCase().trim();
+      assert(/^[A-Z]{3}$/.test(cur), 400, "currency harus ISO 4217 3 huruf");
+      sets.push("currency = ?"); vals.push(cur);
+    }
+    if (b.rate !== undefined) { assert(Number(b.rate) > 0, 400, "rate harus > 0"); sets.push("rate = ?"); vals.push(Number(b.rate)); }
+    if (b.date !== undefined) { assert(/^\d{4}-\d{2}-\d{2}$/.test(b.date), 400, "date format YYYY-MM-DD"); sets.push("date = ?"); vals.push(b.date); }
+    assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
+    run(`UPDATE exchange_rates SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.params.id);
+    audit(ctx, "fx.update", { id: ctx.params.id });
+    json(ctx.res, 200, { message: "Rate updated" });
   });
   router.delete("/api/exchange-rates/:id", requireControl, (ctx) => {
     if (!get("SELECT 1 FROM exchange_rates WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
       throw new ApiError(404, "Kurs tidak ditemukan", "NOT_FOUND");
     run("DELETE FROM exchange_rates WHERE id = ?", ctx.params.id);
+    audit(ctx, "fx.delete", { id: ctx.params.id });
     noContent(ctx.res);
   });
 
@@ -125,6 +191,7 @@ export function register(router) {
     json(ctx.res, 200, rows.map((p) => ({
       id: p.id, employeeId: p.employee_id, name: p.employee_name, period: p.period,
       base_salary: p.base_salary, earnings: p.earnings, deductions: p.deductions, net: p.net,
+      currency: p.currency || "IDR",
       detail: p.detail ? JSON.parse(p.detail) : null,
     })));
   });
