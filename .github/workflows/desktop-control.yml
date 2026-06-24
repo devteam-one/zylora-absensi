@@ -24,7 +24,7 @@ jobs:
       matrix:
         # Hemat menit CI: push → ubuntu saja (validasi). Untuk installer lengkap
         # (Windows .exe + macOS .dmg + Linux), pakai "Run workflow" (dispatch) → matrix penuh.
-        os: ${{ (github.event_name == 'push') && fromJSON('["ubuntu-latest"]') || fromJSON('["windows-latest","macos-latest","ubuntu-latest"]') }}
+        os: ${{ (github.event_name == 'push') && fromJSON('["windows-latest","ubuntu-latest"]') || fromJSON('["windows-latest","macos-latest","ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
