@@ -1,7 +1,7 @@
 // ─── 3 & 4.2. Manajemen Karyawan + Kode Personal ─────────────────────────────
 import { json, noContent, ApiError } from "../lib/http.mjs";
 import { requireFields, pick, assert } from "../lib/validate.mjs";
-import { get, all, run } from "../lib/db.mjs";
+import { get, all, run, tx } from "../lib/db.mjs";
 import { genId, nowISO, hashPassword } from "../lib/security.mjs";
 import { employeeCode, qrImageUrl } from "../lib/qr.mjs";
 import { requireControl, audit } from "../lib/middleware.mjs";
@@ -9,7 +9,7 @@ import { requireControl, audit } from "../lib/middleware.mjs";
 // Ambil karyawan dan pastikan ia milik perusahaan si admin (cegah akses lintas-perusahaan).
 function ownedEmployee(ctx, id) {
   const emp = get("SELECT * FROM employees WHERE id = ? AND company_id = ?", id, ctx.auth.companyId);
-  if (!emp) throw new ApiError(404, "Karyawan tidak ditemukan", "NOT_FOUND");
+  if (!emp) throw new ApiError(404, "Employee not found", "NOT_FOUND");
   return emp;
 }
 
@@ -73,7 +73,7 @@ export function register(router) {
     ]);
     const keys = Object.keys(fields);
     const pin = ctx.body.password || ctx.body.pin;  // set PIN baru (opsional)
-    assert(keys.length > 0 || pin, 400, "Tidak ada field yang diperbarui");
+    assert(keys.length > 0 || pin, 400, "No fields to update");
     const sets = keys.map((k) => `${k} = ?`);
     const vals = keys.map((k) => fields[k]);
     if (pin) { sets.push("password_hash = ?"); vals.push(hashPassword(String(pin))); }
@@ -92,7 +92,14 @@ export function register(router) {
       run("UPDATE employees SET status = 'inactive' WHERE id = ?", ctx.params.id);
       audit(ctx, "employee.deactivate", { id: ctx.params.id });
     } else {
-      run("DELETE FROM employees WHERE id = ?", ctx.params.id);
+      // Hapus permanen + bersihkan SEMUA data rekap terkait (cegah baris yatim
+      // di rekap/payroll). Atomik via transaksi.
+      tx(() => {
+        for (const t of ["attendance", "payslips", "employee_codes", "leave_requests", "devices"]) {
+          try { run(`DELETE FROM ${t} WHERE employee_id = ?`, ctx.params.id); } catch { /* tabel/kolom tak ada → lewati */ }
+        }
+        run("DELETE FROM employees WHERE id = ?", ctx.params.id);
+      });
       audit(ctx, "employee.delete", { id: ctx.params.id });
     }
     noContent(ctx.res);
@@ -137,7 +144,7 @@ export function register(router) {
   router.get("/api/employees/:id/code", requireControl, (ctx) => {
     ownedEmployee(ctx, ctx.params.id);
     const c = get("SELECT * FROM employee_codes WHERE employee_id = ?", ctx.params.id);
-    if (!c) throw new ApiError(404, "Kode personal belum dibuat", "NO_CODE");
+    if (!c) throw new ApiError(404, "Personal code not created yet", "NO_CODE");
     json(ctx.res, 200, { code: c.code, imageUrl: c.image_url, format: c.format });
   });
 

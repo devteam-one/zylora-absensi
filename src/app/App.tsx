@@ -6,10 +6,59 @@ import {
   Building2, Timer, RefreshCw, FileText, BarChart2,
   UserCheck, UserX, Download, Activity, Wifi, WifiOff,
   Smartphone, Monitor, ArrowRight, ChevronRight,
-  AlertTriangle, Eye, RotateCcw, Camera, Zap, Wallet, User
+  AlertTriangle, Eye, RotateCcw, Camera, Zap, Wallet, User,
+  Maximize2, Minimize2
 } from "lucide-react";
 import { api, type ApiAttendanceRow, type ApiLeaveRow, type ApiMe, type ApiMeAttendance, type ApiMeLeave, type ApiMePayslip, type ApiPublicLocation, type ApiEmployee, type EmployeeInput, type ApiLocation, type LocationInput, type SalaryComponent, type PayrollRule, type PayrollRun, type Payslip, type ExchangeRate } from "./api";
 import { Html5Qrcode } from "html5-qrcode";
+import { Toaster, toast } from "sonner"; // notifikasi pop-up (framework UX)
+import { z } from "zod"; // validasi form (skema)
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel } from "./components/ui/alert-dialog";
+
+// --- Skema validasi form (zod) ---
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const optEmail = z.string().trim().email("Invalid email").or(z.literal(""));
+export const employeeSchema = z.object({
+  name: z.string().trim().min(2, "Name must be at least 2 characters"),
+  email: optEmail.optional(),
+  position: z.string().optional(),
+  department: z.string().optional(),
+  schedule_in: z.string().regex(TIME_RE, "Use HH:MM (24h)").optional().or(z.literal("")),
+  schedule_out: z.string().regex(TIME_RE, "Use HH:MM (24h)").optional().or(z.literal("")),
+  base_salary: z.coerce.number().min(0, "Cannot be negative"),
+  password: z.string().optional(),
+});
+export const locationSchema = z.object({
+  name: z.string().trim().min(2, "Location name is required"),
+  radius_m: z.coerce.number().min(1, "Radius must be at least 1 m"),
+});
+export const shiftSchema = z.object({
+  name: z.string().trim().min(1, "Shift name is required"),
+  start: z.string().regex(TIME_RE, "Use HH:MM"),
+  end: z.string().regex(TIME_RE, "Use HH:MM"),
+});
+export const salaryComponentSchema = z.object({
+  name: z.string().trim().min(1, "Component name is required"),
+  type: z.enum(["earning", "deduction"]),
+  basis: z.enum(["fixed", "percent_base", "per_late_min", "per_absent_day", "per_overtime_hour"]),
+  value: z.coerce.number().min(0, "Value cannot be negative"),
+});
+export const payrollRuleSchema = z.object({
+  name: z.string().trim().min(1, "Rule name is required"),
+  metric: z.enum(["late_days", "late_minutes", "overtime_hours", "absent_days", "leave_days"]),
+  threshold: z.coerce.number().min(0, "Threshold cannot be negative"),
+  action: z.enum(["bonus", "deduction"]),
+  amount: z.coerce.number().min(0, "Amount cannot be negative"),
+});
+export const exchangeRateSchema = z.object({
+  currency: z.string().trim().regex(/^[A-Za-z]{3}$/, "Use a 3-letter code (e.g. USD)"),
+  rate: z.coerce.number().positive("Rate must be > 0"),
+});
+function zodErrors(err) {
+  const out = {};
+  for (const i of err.issues) { const k = String(i.path[0] ?? "_"); if (!out[k]) out[k] = i.message; }
+  return out;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,11 +82,11 @@ interface LeaveRequest {
 // api.ts) — tidak ada lagi data contoh/mock di sini.
 
 const STATUS_CFG = {
-  hadir:       { label: "Hadir",       color: "bg-emerald-100 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" },
-  terlambat:   { label: "Terlambat",   color: "bg-amber-100 text-amber-700 border-amber-200",   dot: "bg-amber-500" },
-  izin:        { label: "Izin",        color: "bg-blue-100 text-blue-700 border-blue-200",       dot: "bg-blue-500" },
-  cuti:        { label: "Cuti",        color: "bg-purple-100 text-purple-700 border-purple-200", dot: "bg-purple-500" },
-  tidak_hadir: { label: "Tidak Hadir", color: "bg-red-100 text-red-700 border-red-200",         dot: "bg-red-500" },
+  hadir:       { label: "Present",       color: "bg-emerald-100 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" },
+  terlambat:   { label: "Late",   color: "bg-amber-100 text-amber-700 border-amber-200",   dot: "bg-amber-500" },
+  izin:        { label: "Permission",        color: "bg-blue-100 text-blue-700 border-blue-200",       dot: "bg-blue-500" },
+  cuti:        { label: "Leave",        color: "bg-purple-100 text-purple-700 border-purple-200", dot: "bg-purple-500" },
+  tidak_hadir: { label: "Absent", color: "bg-red-100 text-red-700 border-red-200",         dot: "bg-red-500" },
 };
 
 const DEPT_COLORS: Record<string, string> = {
@@ -50,8 +99,8 @@ const DEPT_COLORS: Record<string, string> = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtTime(d: Date) { return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }
-function fmtDate(d: Date) { return d.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); }
+function fmtTime(d: Date) { return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }
+function fmtDate(d: Date) { return d.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); }
 function nowHHMM() { const d = new Date(); return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; }
 
 function useClock() {
@@ -116,8 +165,69 @@ export const BUILD = {
 // Label versi ringkas: v1.0.0 · a1b2c3d (· channel bila bukan stable).
 export const VERSION_LABEL = `v${BUILD.version} · ${BUILD.sha}${BUILD.channel !== "stable" ? ` · ${BUILD.channel}` : ""}`;
 function VersionTag({ className = "" }: { className?: string }) {
-  const built = BUILD.date ? new Date(BUILD.date).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "";
+  const built = BUILD.date ? new Date(BUILD.date).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "";
   return <span className={className} title={`${BUILD.product}\nVersi ${BUILD.version} (build ${BUILD.code})\ncommit ${BUILD.sha}${built ? `\ndibangun ${built}` : ""}`}>{VERSION_LABEL}</span>;
+}
+
+// Tanggal LOKAL (zona browser, mis. WIB) — BUKAN UTC. toISOString() memakai UTC
+// sehingga di sekitar tengah malam tanggalnya meleset dari backend (zona perusahaan).
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const localYMD = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const localYM = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+
+// ─── Skeleton loading (placeholder berdenyut saat memuat) ─────────────────────
+function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse bg-muted/70 rounded-lg ${className}`} />;
+}
+// Skeleton penuh Sistem Kontrol — tampil saat memulihkan sesi (cegah kedip login).
+function ControlSkeleton() {
+  return (
+    <div className="h-screen flex bg-[#0D1B2A]" style={{ fontFamily: "var(--font-sans)" }}>
+      <div className="w-60 bg-card border-r border-border p-4 space-y-2.5">
+        <Skeleton className="h-8 w-36 mb-5" />
+        {Array.from({ length: 9 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+      </div>
+      <div className="flex-1 p-6 space-y-4">
+        <Skeleton className="h-7 w-56" />
+        <div className="grid grid-cols-4 gap-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
+        <Skeleton className="h-72 w-full" />
+        <p className="text-center text-white/50 text-xs flex items-center justify-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin" />Restoring session…</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tabel paginasi konsisten (standar 12 baris/halaman, kontrol lengkap) ─────
+const PAGE_SIZE = 12; // standar baris per halaman di SELURUH tabel (rekomendasi UX 10–25)
+function usePagination<T>(items: T[], pageSize = PAGE_SIZE) {
+  const [page, setPage] = useState(1);
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const cur = Math.min(page, totalPages);
+  const from = total === 0 ? 0 : (cur - 1) * pageSize + 1;
+  const to = Math.min(cur * pageSize, total);
+  const pageItems = items.slice((cur - 1) * pageSize, cur * pageSize);
+  return { page: cur, setPage, total, totalPages, from, to, pageItems };
+}
+// Kontrol paginasi seragam: First/Prev/Next/Last (nonaktif di ujung, tidak disembunyikan)
+// + indikator "Menampilkan X–Y dari Z data". Pakai di semua tabel agar konsisten.
+function Pagination({ page, totalPages, total, from, to, onPage }: {
+  page: number; totalPages: number; total: number; from: number; to: number; onPage: (p: number) => void;
+}) {
+  if (total === 0) return null;
+  const btn = "px-2.5 py-1.5 rounded-lg border border-border text-xs font-semibold hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors";
+  return (
+    <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+      <span className="text-xs text-muted-foreground">Showing <b className="text-foreground">{from}–{to}</b> of <b className="text-foreground">{total}</b></span>
+      <div className="flex items-center gap-1">
+        <button className={btn} disabled={page <= 1} onClick={() => onPage(1)} title="First page">« First</button>
+        <button className={btn} disabled={page <= 1} onClick={() => onPage(page - 1)} title="Previous">‹ Prev</button>
+        <span className="px-2 py-1.5 text-xs text-muted-foreground tabular-nums">Page {page}/{totalPages}</span>
+        <button className={btn} disabled={page >= totalPages} onClick={() => onPage(page + 1)} title="Next">Next ›</button>
+        <button className={btn} disabled={page >= totalPages} onClick={() => onPage(totalPages)} title="Last page">Last »</button>
+      </div>
+    </div>
+  );
 }
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
@@ -138,7 +248,7 @@ function Avatar({ initials, size = "md" }: { initials: string; size?: "sm" | "md
 }
 
 function MethodBadge({ method }: { method: AttendanceRecord["method"] }) {
-  if (method === "qr_lokasi") return <span className="inline-flex items-center gap-1 text-[10px] text-violet-600 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-full font-semibold"><QrCode className="w-2.5 h-2.5" />QR Lokasi</span>;
+  if (method === "qr_lokasi") return <span className="inline-flex items-center gap-1 text-[10px] text-violet-600 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-full font-semibold"><QrCode className="w-2.5 h-2.5" />QR Location</span>;
   if (method === "terminal") return <span className="inline-flex items-center gap-1 text-[10px] text-sky-600 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full font-semibold"><Monitor className="w-2.5 h-2.5" />Terminal</span>;
   return <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full font-semibold">Manual</span>;
 }
@@ -154,10 +264,10 @@ function MethodBadge({ method }: { method: AttendanceRecord["method"] }) {
 // lokasi ditolak / GPS mati.
 function getDeviceGps(): Promise<{ lat: number; lng: number }> {
   return new Promise((resolve, reject) => {
-    if (!("geolocation" in navigator)) { reject(new Error("Perangkat tidak mendukung GPS")); return; }
+    if (!("geolocation" in navigator)) { reject(new Error("Device doesn't support GPS")); return; }
     navigator.geolocation.getCurrentPosition(
       (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-      (e) => reject(new Error(e.code === 1 ? "Izin lokasi ditolak — aktifkan GPS untuk absen" : "Gagal membaca GPS")),
+      (e) => reject(new Error(e.code === 1 ? "Location permission denied — enable GPS to check in" : "Failed to read GPS")),
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
     );
   });
@@ -188,8 +298,8 @@ function QrScanner({ onDecoded, onError }: { onDecoded: (text: string) => void; 
       () => { /* gagal decode per-frame: abaikan */ },
     ).catch((e: any) => {
       onError(e?.message?.includes("Permission") || e?.name === "NotAllowedError"
-        ? "Izin kamera ditolak — aktifkan kamera untuk memindai QR"
-        : (e?.message || "Kamera tidak bisa dibuka"));
+        ? "Camera permission denied — enable the camera to scan QR"
+        : (e?.message || "Could not open the camera"));
     });
     return () => {
       cancelled = true;
@@ -239,27 +349,27 @@ function UpdateBanner({ role }: { role: string }) {
 // admin. Status & check-in lewat /api/me/*; identitas dari token (tak kirim kode).
 // ── Badge kecil generik untuk app karyawan (riwayat presensi & status izin) ──
 const ATT_PILL: Record<string, { label: string; cls: string }> = {
-  hadir:     { label: "Hadir",     cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
-  terlambat: { label: "Terlambat", cls: "bg-amber-100 text-amber-700 border-amber-200" },
-  izin:      { label: "Izin",      cls: "bg-blue-100 text-blue-700 border-blue-200" },
-  cuti:      { label: "Cuti",      cls: "bg-purple-100 text-purple-700 border-purple-200" },
-  sakit:     { label: "Sakit",     cls: "bg-orange-100 text-orange-700 border-orange-200" },
-  alpa:      { label: "Alpa",      cls: "bg-red-100 text-red-700 border-red-200" },
+  hadir:     { label: "Present",     cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  terlambat: { label: "Late", cls: "bg-amber-100 text-amber-700 border-amber-200" },
+  izin:      { label: "Permission",      cls: "bg-blue-100 text-blue-700 border-blue-200" },
+  cuti:      { label: "Leave",      cls: "bg-purple-100 text-purple-700 border-purple-200" },
+  sakit:     { label: "Sick",     cls: "bg-orange-100 text-orange-700 border-orange-200" },
+  alpa:      { label: "Absent",      cls: "bg-red-100 text-red-700 border-red-200" },
 };
 const LEAVE_PILL: Record<string, { label: string; cls: string }> = {
-  pending:  { label: "Menunggu",  cls: "bg-amber-100 text-amber-700 border-amber-200" },
-  approved: { label: "Disetujui", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
-  rejected: { label: "Ditolak",   cls: "bg-red-100 text-red-700 border-red-200" },
+  pending:  { label: "Pending",  cls: "bg-amber-100 text-amber-700 border-amber-200" },
+  approved: { label: "Approved", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  rejected: { label: "Rejected",   cls: "bg-red-100 text-red-700 border-red-200" },
 };
 function Pill({ map, value }: { map: Record<string, { label: string; cls: string }>; value: string }) {
   const c = map[value] || { label: value, cls: "bg-muted text-muted-foreground border-border" };
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${c.cls}`}>{c.label}</span>;
 }
-// "YYYY-MM-DD" → tanggal pendek id-ID (Sen, 24 Jun). String tak valid dikembalikan apa adanya.
+// "YYYY-MM-DD" → tanggal pendek en-US (Sen, 24 Jun). String tak valid dikembalikan apa adanya.
 function fmtDateShort(s?: string | null) {
   if (!s) return "—";
   const d = new Date(s + "T00:00:00");
-  return isNaN(+d) ? s : d.toLocaleDateString("id-ID", { weekday: "short", day: "numeric", month: "short" });
+  return isNaN(+d) ? s : d.toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" });
 }
 
 function QRLokasiEmployeeApp() {
@@ -267,6 +377,7 @@ function QRLokasiEmployeeApp() {
   const [me, setMe] = useState<ApiMe | null>(null);
   const [loginId, setLoginId] = useState(() => { try { return localStorage.getItem("zylora.employee.id") || ""; } catch { return ""; } });
   const [loginPin, setLoginPin] = useState("");
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const [loginErr, setLoginErr] = useState("");
   const [remember, setRemember] = useState(true); // "Ingat saya"
   const [busy, setBusy] = useState(false);
@@ -275,7 +386,7 @@ function QRLokasiEmployeeApp() {
   const [scanErr, setScanErr] = useState("");
   const [scanFor, setScanFor] = useState<null | "in" | "out">(null);
   const scanForRef = useRef<null | "in" | "out">(null);
-  const [locName, setLocName] = useState("Lokasi Kantor");
+  const [locName, setLocName] = useState("Office Location");
   const now = useClock();
 
   // Navigasi bawah & aksi terakhir (untuk label sukses yang benar).
@@ -323,7 +434,7 @@ function QRLokasiEmployeeApp() {
       } catch { /* abaikan */ }
       try { setLocName((await api.publicLocation()).name); } catch { /* abaikan */ }
     } catch (e: any) {
-      setLoginErr(e?.message || "Login gagal");
+      setLoginErr(e?.message || "Login failed");
     } finally { setBusy(false); }
   };
 
@@ -366,16 +477,16 @@ function QRLokasiEmployeeApp() {
   const submitLeave = async () => {
     setLvErr(""); setLvOk("");
     if (!token) return;
-    if (!lvStart || !lvEnd) { setLvErr("Tanggal mulai & selesai wajib diisi"); return; }
-    if (lvEnd < lvStart) { setLvErr("Tanggal selesai tidak boleh sebelum tanggal mulai"); return; }
+    if (!lvStart || !lvEnd) { setLvErr("Start & end dates are required"); return; }
+    if (lvEnd < lvStart) { setLvErr("End date can't be before start date"); return; }
     setLvBusy(true);
     try {
       await api.submitLeave(token, { type: lvType, start_date: lvStart, end_date: lvEnd, reason: lvReason.trim() || undefined });
-      setLvOk("Pengajuan terkirim, menunggu persetujuan admin.");
+      setLvOk("Request submitted, awaiting admin approval.");
       setLvStart(""); setLvEnd(""); setLvReason("");
       setLeaves(await api.meLeaves(token));
     } catch (e: any) {
-      setLvErr(e?.message || "Gagal mengirim pengajuan");
+      setLvErr(e?.message || "Failed to submit request");
     } finally { setLvBusy(false); }
   };
 
@@ -408,7 +519,7 @@ function QRLokasiEmployeeApp() {
       setScanDone(true);
       setTimeout(() => setScanDone(false), 2500);
     } catch (e: any) {
-      setScanErr(e?.message || "Gagal absen");
+      setScanErr(e?.message || "Check-in failed");
     } finally {
       setScanning(false);
     }
@@ -418,6 +529,7 @@ function QRLokasiEmployeeApp() {
 
   return (
     <div className="flex flex-col h-full bg-background">
+      <Toaster richColors position="top-center" />
       <OfflineBanner />
       <UpdateBanner role="employee" />
       {/* Header */}
@@ -425,8 +537,8 @@ function QRLokasiEmployeeApp() {
         <div className="flex items-center gap-2.5">
           <Smartphone className="w-5 h-5 text-white/80" />
           <div>
-            <p className="font-bold text-white text-sm">Zylora Absensi</p>
-            <p className="text-[10px] text-white/50">Absensi QR Karyawan</p>
+            <p className="font-bold text-white text-sm">Zylora Attendance</p>
+            <p className="text-[10px] text-white/50">Employee QR Attendance</p>
           </div>
         </div>
         <div className="text-right">
@@ -444,11 +556,11 @@ function QRLokasiEmployeeApp() {
               <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center mb-5">
                 <Smartphone className="w-6 h-6 text-white" />
               </div>
-              <h2 className="font-bold text-lg mb-1">Masuk ke Aplikasi</h2>
-              <p className="text-sm text-muted-foreground mb-5">Gunakan ID karyawan Anda untuk login, lalu pindai QR yang ditempel di lokasi absen.</p>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">ID atau Email</label>
+              <h2 className="font-bold text-lg mb-1">Sign in to the App</h2>
+              <p className="text-sm text-muted-foreground mb-5">Use your employee ID to sign in, then scan the QR posted at the attendance location.</p>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">ID or Email</label>
               <input value={loginId} onChange={e => setLoginId(e.target.value)}
-                placeholder="ID atau email dari admin"
+                placeholder="ID or email from admin"
                 className="w-full px-4 py-2.5 rounded-xl border border-border bg-input-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-3 transition-all" />
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">PIN</label>
               <input value={loginPin} onChange={e => setLoginPin(e.target.value)} type="password"
@@ -460,10 +572,10 @@ function QRLokasiEmployeeApp() {
                 <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="accent-primary w-3.5 h-3.5" />
                 Ingat saya di perangkat ini
               </label>
-              <p className="text-[11px] text-muted-foreground mt-2">ID &amp; PIN dibuat oleh admin di Sistem Kontrol → Karyawan.</p>
+              <p className="text-[11px] text-muted-foreground mt-2">ID &amp; PIN are created by the admin in Control System → Employees.</p>
               <button onClick={doLogin} disabled={!loginId.trim() || !loginPin.trim() || busy}
                 className="w-full mt-3 py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
-                {busy ? "Memproses…" : <>Masuk <ArrowRight className="w-4 h-4" /></>}
+                {busy ? "Processing…" : <>Sign in <ArrowRight className="w-4 h-4" /></>}
               </button>
               <VersionTag className="block text-center font-mono text-[10px] text-muted-foreground/60 mt-4" />
             </motion.div>
@@ -479,7 +591,7 @@ function QRLokasiEmployeeApp() {
                   <p className="text-xs text-muted-foreground">{employee.position}</p>
                 </div>
               </div>
-              <button onClick={doLogout}
+              <button onClick={() => setConfirmLogout(true)}
                 className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
                 <LogOut className="w-3.5 h-3.5" />Keluar
               </button>
@@ -495,18 +607,18 @@ function QRLokasiEmployeeApp() {
               <div>
                 <p className="font-semibold text-sm">
                   {checkedOut
-                    ? `Masuk ${rec?.checkIn ?? "—"} · Pulang ${me?.today?.check_out ?? "—"}`
-                    : checkedIn ? `Check-in tercatat: ${rec?.checkIn}` : "Belum check-in"}
+                    ? `In ${rec?.checkIn ?? "—"} · Out ${me?.today?.check_out ?? "—"}`
+                    : checkedIn ? `Check-in tercatat: ${rec?.checkIn}` : "Not checked in yet"}
                 </p>
-                <p className="text-xs text-muted-foreground">Jadwal: {employee.scheduleIn} – {employee.scheduleOut}</p>
+                <p className="text-xs text-muted-foreground">Schedule: {employee.scheduleIn} – {employee.scheduleOut}</p>
               </div>
               {rec && <div className="ml-auto"><StatusBadge status={rec.status} /></div>}
             </div>
 
             {/* Scanner Panel */}
             <div className="bg-card rounded-2xl border border-border p-5">
-              <p className="text-sm font-semibold mb-1">Pindai QR di Lokasi Absen</p>
-              <p className="text-xs text-muted-foreground mb-4">Arahkan kamera ponsel ke QR Code yang ditampilkan di layar / ditempel di area pintu masuk.</p>
+              <p className="text-sm font-semibold mb-1">Scan QR at Attendance Location</p>
+              <p className="text-xs text-muted-foreground mb-4">Point your phone camera at the QR shown on screen / posted at the entrance.</p>
 
               {/* Viewfinder — kamera SUNGGUHAN saat memindai (responsif HP & tablet) */}
               <div className="relative w-full max-w-[240px] sm:max-w-[320px] md:max-w-[380px] mx-auto aspect-square bg-foreground/5 rounded-2xl border-2 border-dashed border-border overflow-hidden flex items-center justify-center mb-3">
@@ -523,12 +635,12 @@ function QRLokasiEmployeeApp() {
                     <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
                       <Camera className="w-10 h-10" />
                     </motion.div>
-                    <p className="text-xs font-semibold">Memproses & cek GPS…</p>
+                    <p className="text-xs font-semibold">Processing & checking GPS…</p>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-2 text-muted-foreground">
                     <Camera className="w-10 h-10 opacity-30" />
-                    <p className="text-xs text-center opacity-60">Tekan tombol di bawah untuk<br/>membuka kamera &amp; pindai QR</p>
+                    <p className="text-xs text-center opacity-60">Tap the button below to<br/>open camera &amp; scan QR</p>
                   </div>
                 )}
 
@@ -539,13 +651,13 @@ function QRLokasiEmployeeApp() {
               </div>
 
               {scanFor && (
-                <button onClick={cancelScan} className="w-full mb-3 py-2 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/40">Batal</button>
+                <button onClick={cancelScan} className="w-full mb-3 py-2 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/40">Cancel</button>
               )}
 
               {/* GPS — koordinat HP diperiksa saat absen (validasi radius di server) */}
               <div className="flex items-center justify-center gap-2 text-xs font-semibold mb-4 text-muted-foreground text-center">
                 <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Lokasi: {locName} · GPS HP diperiksa saat memindai</span>
+                <span>Location: {locName} · phone GPS checked on scan</span>
               </div>
 
               {scanErr && (
@@ -558,18 +670,18 @@ function QRLokasiEmployeeApp() {
               {!scanFor && !checkedIn && !checkedOut && (
                 <button onClick={() => openScan("in")} disabled={scanning}
                   className="w-full py-3 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
-                  <Camera className="w-4 h-4" />Pindai untuk Check-In
+                  <Camera className="w-4 h-4" />Scan to Check-In
                 </button>
               )}
               {!scanFor && checkedIn && !checkedOut && (
                 <button onClick={() => openScan("out")} disabled={scanning}
                   className="w-full py-3 rounded-xl bg-foreground text-background font-semibold text-sm hover:bg-foreground/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
-                  <LogOut className="w-4 h-4" />Pindai untuk Check-Out
+                  <LogOut className="w-4 h-4" />Scan to Check-Out
                 </button>
               )}
               {checkedOut && (
                 <div className="w-full py-3 rounded-xl bg-muted text-muted-foreground font-semibold text-sm flex items-center justify-center gap-2">
-                  <CheckCircle2 className="w-4 h-4" />Absen selesai
+                  <CheckCircle2 className="w-4 h-4" />Attendance complete
                 </div>
               )}
             </div>
@@ -579,14 +691,28 @@ function QRLokasiEmployeeApp() {
             {tab === "riwayat" && (
               <div className="bg-card rounded-2xl border border-border p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm font-semibold">Riwayat Kehadiran</p>
+                  <p className="text-sm font-semibold">Attendance History</p>
                   <button onClick={() => setHistory(null)}
                     className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
                     <RefreshCw className="w-3 h-3" />Muat ulang
                   </button>
                 </div>
+                {history && history.length > 0 && (() => {
+                  const d = new Date();
+                  const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+                  const m = history.filter((r) => r.date.startsWith(ym));
+                  const hadir = m.filter((r) => r.status === "hadir").length;
+                  const telat = m.filter((r) => r.status === "terlambat").length;
+                  return (
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-2.5 text-center"><p className="text-lg font-bold text-emerald-700">{hadir}</p><p className="text-[10px] text-emerald-700/80">Present this mo</p></div>
+                      <div className="rounded-xl bg-amber-50 border border-amber-200 p-2.5 text-center"><p className="text-lg font-bold text-amber-700">{telat}</p><p className="text-[10px] text-amber-700/80">Terlambat</p></div>
+                      <div className="rounded-xl bg-muted/40 border border-border p-2.5 text-center"><p className="text-lg font-bold">{m.length}</p><p className="text-[10px] text-muted-foreground">Total days</p></div>
+                    </div>
+                  );
+                })()}
                 {listBusy && history === null ? (
-                  <p className="text-xs text-muted-foreground py-8 text-center">Memuat…</p>
+                  <p className="text-xs text-muted-foreground py-8 text-center">Loading…</p>
                 ) : history && history.length > 0 ? (
                   <div className="divide-y divide-border">
                     {history.map((r) => (
@@ -594,14 +720,14 @@ function QRLokasiEmployeeApp() {
                         <Calendar className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                         <div className="min-w-0">
                           <p className="text-sm font-semibold">{fmtDateShort(r.date)}</p>
-                          <p className="text-[11px] text-muted-foreground">Masuk {r.check_in ?? "—"} · Pulang {r.check_out ?? "—"}</p>
+                          <p className="text-[11px] text-muted-foreground">In {r.check_in ?? "—"} · Out {r.check_out ?? "—"}{workDur(r.check_in, r.check_out)}</p>
                         </div>
                         <div className="ml-auto"><Pill map={ATT_PILL} value={r.status} /></div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground py-8 text-center">Belum ada riwayat kehadiran.</p>
+                  <p className="text-xs text-muted-foreground py-8 text-center">No attendance history yet.</p>
                 )}
               </div>
             )}
@@ -609,38 +735,38 @@ function QRLokasiEmployeeApp() {
             {/* ════ TAB: IZIN / CUTI ════ */}
             {tab === "izin" && <>
               <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-sm font-semibold mb-3">Ajukan Izin / Cuti</p>
+                <p className="text-sm font-semibold mb-3">Request Leave / Permission</p>
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   {["cuti", "izin", "sakit"].map((t) => (
                     <button key={t} onClick={() => setLvType(t)}
-                      className={`py-2 rounded-lg text-xs font-semibold border capitalize transition-colors ${lvType === t ? "bg-primary text-white border-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}>{t}</button>
+                      className={`py-2 rounded-lg text-xs font-semibold border transition-colors ${lvType === t ? "bg-primary text-white border-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}>{({cuti:"Leave",izin:"Permission",sakit:"Sick"} as Record<string,string>)[t] || t}</button>
                   ))}
                 </div>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <div>
-                    <label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Mulai</label>
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Start</label>
                     <input type="date" value={lvStart} onChange={(e) => setLvStart(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg border border-border bg-input-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
                   </div>
                   <div>
-                    <label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Selesai</label>
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">End</label>
                     <input type="date" value={lvEnd} min={lvStart || undefined} onChange={(e) => setLvEnd(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg border border-border bg-input-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
                   </div>
                 </div>
-                <textarea value={lvReason} onChange={(e) => setLvReason(e.target.value)} rows={2} placeholder="Alasan (opsional)"
+                <textarea value={lvReason} onChange={(e) => setLvReason(e.target.value)} rows={2} placeholder="Reason (optional)"
                   className="w-full px-3 py-2 rounded-lg border border-border bg-input-background text-sm mb-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20" />
                 {lvErr && <p className="text-xs text-destructive mb-2 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{lvErr}</p>}
                 {lvOk && <p className="text-xs text-emerald-600 mb-2 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />{lvOk}</p>}
                 <button onClick={submitLeave} disabled={lvBusy || !lvStart || !lvEnd}
                   className="w-full py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-40 flex items-center justify-center gap-2 transition-all">
-                  <Check className="w-4 h-4" />{lvBusy ? "Mengirim…" : "Ajukan"}
+                  <Check className="w-4 h-4" />{lvBusy ? "Sending…" : "Submit"}
                 </button>
               </div>
               <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-sm font-semibold mb-3">Pengajuan Saya</p>
+                <p className="text-sm font-semibold mb-3">My Requests</p>
                 {listBusy && leaves === null ? (
-                  <p className="text-xs text-muted-foreground py-6 text-center">Memuat…</p>
+                  <p className="text-xs text-muted-foreground py-6 text-center">Loading…</p>
                 ) : leaves && leaves.length > 0 ? (
                   <div className="divide-y divide-border">
                     {leaves.map((l) => (
@@ -657,7 +783,7 @@ function QRLokasiEmployeeApp() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground py-6 text-center">Belum ada pengajuan.</p>
+                  <p className="text-xs text-muted-foreground py-6 text-center">No requests yet.</p>
                 )}
               </div>
             </>}
@@ -665,9 +791,9 @@ function QRLokasiEmployeeApp() {
             {/* ════ TAB: GAJI (slip gaji milik sendiri, read-only) ════ */}
             {tab === "gaji" && (
               <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-sm font-semibold mb-3">Slip Gaji Saya</p>
+                <p className="text-sm font-semibold mb-3">My Payslips</p>
                 {listBusy && payslips === null ? (
-                  <p className="text-xs text-muted-foreground py-8 text-center">Memuat…</p>
+                  <p className="text-xs text-muted-foreground py-8 text-center">Loading…</p>
                 ) : payslips && payslips.length > 0 ? (
                   <div className="space-y-3">
                     {payslips.map((p) => (
@@ -677,9 +803,9 @@ function QRLokasiEmployeeApp() {
                           <span className="text-sm font-bold text-primary">{fmtMoney(p.net, p.currency)}</span>
                         </div>
                         <div className="grid grid-cols-3 gap-2 text-[11px]">
-                          <div className="text-muted-foreground">Pokok<br /><span className="text-foreground font-mono">{fmtMoney(p.base_salary, p.currency)}</span></div>
-                          <div className="text-muted-foreground">Tunjangan<br /><span className="text-emerald-600 font-mono">+{fmtMoney(p.earnings, p.currency)}</span></div>
-                          <div className="text-muted-foreground">Potongan<br /><span className="text-red-600 font-mono">−{fmtMoney(p.deductions, p.currency)}</span></div>
+                          <div className="text-muted-foreground">Base<br /><span className="text-foreground font-mono">{fmtMoney(p.base_salary, p.currency)}</span></div>
+                          <div className="text-muted-foreground">Allowance<br /><span className="text-emerald-600 font-mono">+{fmtMoney(p.earnings, p.currency)}</span></div>
+                          <div className="text-muted-foreground">Deduction<br /><span className="text-red-600 font-mono">−{fmtMoney(p.deductions, p.currency)}</span></div>
                         </div>
                         {p.detail?.lines && p.detail.lines.length > 0 && (
                           <div className="mt-2 pt-2 border-t border-border space-y-0.5">
@@ -694,7 +820,7 @@ function QRLokasiEmployeeApp() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground py-8 text-center">Belum ada slip gaji. Slip muncul setelah admin memproses payroll.</p>
+                  <p className="text-xs text-muted-foreground py-8 text-center">No payslips yet. Payslips appear after the admin runs payroll.</p>
                 )}
               </div>
             )}
@@ -705,15 +831,15 @@ function QRLokasiEmployeeApp() {
                 <div className="bg-card rounded-2xl border border-border p-6 flex flex-col items-center text-center">
                   <Avatar initials={employee.avatar} size="lg" />
                   <p className="font-bold text-base mt-3">{employee.name}</p>
-                  <p className="text-xs text-muted-foreground">{employee.position || "Karyawan"}{me?.department ? ` · ${me.department}` : ""}</p>
+                  <p className="text-xs text-muted-foreground">{employee.position || "Employee"}{me?.department ? ` · ${me.department}` : ""}</p>
                 </div>
                 <div className="bg-card rounded-2xl border border-border p-4 text-sm">
                   {([
-                    ["ID Karyawan", employee.id],
-                    ["Departemen", me?.department || "—"],
+                    ["Employee ID", employee.id],
+                    ["Department", me?.department || "—"],
                     ["Email", me?.email || "—"],
-                    ["Jadwal", `${employee.scheduleIn} – ${employee.scheduleOut}`],
-                    ["Tanggal Masuk", me?.start_date ? fmtDateShort(me.start_date) : "—"],
+                    ["Schedule", `${employee.scheduleIn} – ${employee.scheduleOut}`],
+                    ["Join Date", me?.start_date ? fmtDateShort(me.start_date) : "—"],
                   ] as const).map(([k, v]) => (
                     <div key={k} className="flex justify-between py-1.5 border-b border-border last:border-0">
                       <span className="text-muted-foreground">{k}</span><span className="font-semibold text-right">{v}</span>
@@ -728,7 +854,7 @@ function QRLokasiEmployeeApp() {
                     <div className="w-40 h-40 rounded-xl border border-dashed border-border flex items-center justify-center text-muted-foreground"><QrCode className="w-10 h-10 opacity-30" /></div>
                   )}
                   {me?.code && <p className="text-[11px] font-mono text-muted-foreground mt-3 break-all px-4">{me.code}</p>}
-                  <button onClick={doLogout} className="mt-4 text-xs text-red-600 font-semibold flex items-center gap-1"><LogOut className="w-3.5 h-3.5" />Keluar akun</button>
+                  <button onClick={() => setConfirmLogout(true)} className="mt-4 text-xs text-red-600 font-semibold flex items-center gap-1"><LogOut className="w-3.5 h-3.5" />Sign out</button>
                 </div>
               </div>
             )}
@@ -739,7 +865,7 @@ function QRLokasiEmployeeApp() {
       {/* ════ Navigasi bawah (hanya saat login) ════ */}
       {loggedIn && employee && (
         <div className="flex-shrink-0 border-t border-border bg-card grid grid-cols-5">
-          {([["absen", "Absen", Scan], ["riwayat", "Riwayat", Calendar], ["gaji", "Gaji", Wallet], ["izin", "Izin", FileText], ["profil", "Profil", User]] as const).map(([key, label, Icon]) => (
+          {([["absen", "Check-in", Scan], ["riwayat", "History", Calendar], ["gaji", "Salary", Wallet], ["izin", "Leave", FileText], ["profil", "Profile", User]] as const).map(([key, label, Icon]) => (
             <button key={key} onClick={() => setTab(key)}
               className={`flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold transition-colors ${tab === key ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
               <Icon className="w-5 h-5" />{label}
@@ -747,56 +873,53 @@ function QRLokasiEmployeeApp() {
           ))}
         </div>
       )}
+      <AlertDialog open={confirmLogout} onOpenChange={setConfirmLogout}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign out?</AlertDialogTitle>
+            <AlertDialogDescription>You'll need to sign in again with your ID & PIN to check in.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => doLogout()} className="bg-red-600 hover:bg-red-700">Yes, sign out</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-// Login admin Sistem Kontrol (mengganti auto-login demo). Bisa juga daftar
-// perusahaan+admin baru (POST /api/control/register) untuk setup awal.
+// Login admin Sistem Kontrol. Registrasi mandiri DIHAPUS (pengerasan keamanan):
+// akun admin hanya dibuat operator via shell server (`tools/register-admin.mjs`).
 function ControlLogin({ onLogin }: { onLogin: (email: string, password: string, remember?: boolean) => Promise<void> }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState(() => { try { return localStorage.getItem("zylora.control.email") || ""; } catch { return ""; } });
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [company, setCompany] = useState("");
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const submit = async () => {
-    if (!email.trim() || !password) { setErr("Email & password wajib"); return; }
-    if (mode === "register" && (!name.trim() || !company.trim())) { setErr("Nama admin & perusahaan wajib"); return; }
-    if (mode === "register" && password.length < 8) { setErr("Password minimal 8 karakter"); return; }
+    if (!email.trim() || !password) { setErr("Email & password are required"); return; }
     setBusy(true); setErr("");
     try {
-      if (mode === "register") await api.controlRegister({ name: name.trim(), email: email.trim(), password, company_name: company.trim() });
       await onLogin(email, password, remember);
-    } catch (e: any) { setErr(e?.message || "Gagal masuk"); setBusy(false); }
+    } catch (e: any) { setErr(e?.message || "Sign-in failed"); setBusy(false); }
   };
   const inputCls = "w-full px-3 py-2 rounded-lg border border-border text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-primary/30";
-  const tabCls = (m: string) => `flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${mode === m ? "bg-[#1B3D72] text-white" : "text-muted-foreground hover:bg-muted/50"}`;
   return (
     <div className="h-screen flex items-center justify-center bg-[#0D1B2A] p-4" style={{ fontFamily: "var(--font-sans)" }}>
       <div className="bg-card rounded-2xl border border-border p-7 w-full max-w-sm shadow-lg">
         <div className="w-12 h-12 rounded-xl bg-[#1B3D72] flex items-center justify-center mb-5"><Shield className="w-6 h-6 text-white" /></div>
-        {/* Toggle Masuk / Daftar — registrasi perusahaan jelas terlihat dari awal. */}
-        <div className="flex gap-1 p-1 mb-5 rounded-xl bg-muted/40">
-          <button onClick={() => { setMode("login"); setErr(""); }} className={tabCls("login")}>Masuk</button>
-          <button onClick={() => { setMode("register"); setErr(""); }} className={tabCls("register")}>Daftar</button>
-        </div>
-        <h2 className="font-bold text-lg mb-1">{mode === "login" ? "Masuk Sistem Kontrol" : "Daftar Perusahaan Baru"}</h2>
-        <p className="text-sm text-muted-foreground mb-5">{mode === "login" ? "Login admin untuk mengelola absensi." : "Buat akun admin + perusahaan baru, langsung dari sini."}</p>
+        <h2 className="font-bold text-lg mb-1">Sign in to Control System</h2>
+        <p className="text-sm text-muted-foreground mb-5">Admin login to manage attendance.</p>
         {err && <div className="flex items-center gap-2 p-2.5 mb-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{err}</div>}
-        {mode === "register" && <>
-          <input className={inputCls} placeholder="Nama admin" value={name} onChange={e => setName(e.target.value)} />
-          <input className={inputCls} placeholder="Nama perusahaan (PT ...)" value={company} onChange={e => setCompany(e.target.value)} />
-        </>}
-        <input className={inputCls} type="email" placeholder="Email admin" value={email} onChange={e => setEmail(e.target.value)} />
-        <input className={inputCls} type="password" placeholder={mode === "register" ? "Password (min. 8 karakter)" : "Password"} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
+        <input className={inputCls} type="email" placeholder="Admin email" value={email} onChange={e => setEmail(e.target.value)} />
+        <input className={inputCls} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
         <label className="flex items-center gap-2 text-xs text-muted-foreground mb-3 cursor-pointer select-none">
           <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="accent-[#1B3D72] w-3.5 h-3.5" />
-          Ingat saya di perangkat ini
+          Remember me on this device
         </label>
-        <button disabled={busy} onClick={submit} className="w-full mt-1 py-3 rounded-xl bg-[#1B3D72] text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50">{busy ? "Memproses…" : mode === "login" ? "Masuk" : "Daftar & Masuk"}</button>
+        <button disabled={busy} onClick={submit} className="w-full mt-1 py-3 rounded-xl bg-[#1B3D72] text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50">{busy ? "Signing in…" : "Sign in"}</button>
+        <p className="text-[11px] text-muted-foreground mt-4 text-center leading-relaxed">Account registration is handled by the system operator. Contact your administrator to create a new account.</p>
       </div>
     </div>
   );
@@ -829,6 +952,8 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
   const initials = (name: string) => name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
   const { timeLeft, qrUrl, staticUrl } = useDynamicQR(qrInterval);
   const [tab, setTab] = useState<"qr_display" | "kehadiran" | "izin_cuti" | "karyawan" | "lokasi" | "shift" | "perangkat" | "riwayat" | "penggajian" | "kurs" | "pengaturan" | "log">("qr_display");
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const leavePg = usePagination(leaveRequests); // paginasi tabel Izin & Cuti (12/hal)
   // Data ASLI dari server untuk pratinjau QR (bukan hardcoded/client-side).
   const [companyName, setCompanyName] = useState("");
   const [pubLoc, setPubLoc] = useState<ApiPublicLocation | null>(null);
@@ -870,25 +995,25 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-white/70" />
             <div>
-              <p className="font-bold text-white text-sm">Sistem Kontrol</p>
-              <p className="text-[10px] text-white/40">Panel Admin · Desktop</p>
+              <p className="font-bold text-white text-sm">Control System</p>
+              <p className="text-[10px] text-white/40">Admin Panel · Desktop</p>
             </div>
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
           {[
-            { key: "qr_display", label: "Tampilan QR", icon: <QrCode className="w-4 h-4" /> },
-            { key: "kehadiran",  label: "Kehadiran",   icon: <Activity className="w-4 h-4" /> },
-            { key: "izin_cuti",  label: "Izin & Cuti", icon: <FileText className="w-4 h-4" />, badge: leaveRequests.filter(l => l.status === "pending").length },
-            { key: "karyawan",   label: "Karyawan",    icon: <UserCheck className="w-4 h-4" />, badge: employees.length },
-            { key: "lokasi",     label: "Lokasi & QR", icon: <MapPin className="w-4 h-4" />, badge: locations.length },
-            { key: "shift",      label: "Shift",       icon: <Timer className="w-4 h-4" /> },
-            { key: "perangkat",  label: "Perangkat",   icon: <Smartphone className="w-4 h-4" /> },
-            { key: "riwayat",    label: "Riwayat",     icon: <Calendar className="w-4 h-4" /> },
-            { key: "penggajian", label: "Penggajian",  icon: <Download className="w-4 h-4" /> },
-            { key: "kurs",       label: "Kurs",        icon: <RotateCcw className="w-4 h-4" /> },
-            { key: "pengaturan", label: "Pengaturan",  icon: <Building2 className="w-4 h-4" /> },
-            { key: "log",        label: "Log Audit",   icon: <BarChart2 className="w-4 h-4" /> },
+            { key: "qr_display", label: "QR Display",  icon: <QrCode className="w-4 h-4" /> },
+            { key: "kehadiran",  label: "Attendance",  icon: <Activity className="w-4 h-4" /> },
+            { key: "izin_cuti",  label: "Leave",       icon: <FileText className="w-4 h-4" />, badge: leaveRequests.filter(l => l.status === "pending").length },
+            { key: "karyawan",   label: "Employees",   icon: <UserCheck className="w-4 h-4" />, badge: employees.length },
+            { key: "lokasi",     label: "Locations & QR", icon: <MapPin className="w-4 h-4" />, badge: locations.length },
+            { key: "shift",      label: "Shifts",      icon: <Timer className="w-4 h-4" /> },
+            { key: "perangkat",  label: "Devices",     icon: <Smartphone className="w-4 h-4" /> },
+            { key: "riwayat",    label: "History",     icon: <Calendar className="w-4 h-4" /> },
+            { key: "penggajian", label: "Payroll",     icon: <Download className="w-4 h-4" /> },
+            { key: "kurs",       label: "Exchange Rates", icon: <RotateCcw className="w-4 h-4" /> },
+            { key: "pengaturan", label: "Settings",    icon: <Building2 className="w-4 h-4" /> },
+            { key: "log",        label: "Audit Log",   icon: <BarChart2 className="w-4 h-4" /> },
           ].map(({ key, label, icon, badge }: any) => (
             <button key={key} onClick={() => setTab(key)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${tab === key ? "bg-white/20 text-white" : "text-white/60 hover:bg-white/10 hover:text-white"}`}>
@@ -900,14 +1025,26 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
         <div className="px-4 py-3 border-t border-white/10">
           <div className={`flex items-center gap-1.5 text-[11px] ${connected ? "text-accent" : online ? "text-amber-400" : "text-red-400"}`}>
             {connected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-            {connected ? "Terhubung ke server" : online ? "Server tak terjangkau" : "Tidak ada internet"}
+            {connected ? "Connected to server" : online ? "Server unreachable" : "No internet"}
           </div>
           <p className="font-mono text-white/70 text-xs mt-0.5 tabular-nums">{fmtTime(now)}</p>
           <VersionTag className="block font-mono text-[10px] text-white/30 mb-2" />
-          <button onClick={onLogout} className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white/70 bg-white/10 hover:bg-white/20 transition-colors">
-            <LogOut className="w-3.5 h-3.5" />Keluar
+          <button onClick={() => setConfirmLogout(true)} className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white/70 bg-white/10 hover:bg-white/20 transition-colors">
+            <LogOut className="w-3.5 h-3.5" />Sign out
           </button>
         </div>
+        <AlertDialog open={confirmLogout} onOpenChange={setConfirmLogout}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Sign out of Control System?</AlertDialogTitle>
+              <AlertDialogDescription>Your admin session will end. You'll need to sign in again to manage attendance.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => onLogout()} className="bg-red-600 hover:bg-red-700">Yes, sign out</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       {/* Main */}
@@ -915,7 +1052,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
         <div className="bg-card border-b border-border px-5 py-3 flex items-center justify-between flex-shrink-0">
           <div>
             <h1 className="font-bold text-sm">
-              {({ qr_display: "QR Code Lokasi Absensi", kehadiran: "Rekap Kehadiran", izin_cuti: "Manajemen Izin & Cuti", karyawan: "Kelola Karyawan", lokasi: "Lokasi & QR", shift: "Shift Kerja", perangkat: "Perangkat Terdaftar", riwayat: "Riwayat Presensi", penggajian: "Penggajian", kurs: "Manajemen Kurs", pengaturan: "Pengaturan Perusahaan", log: "Log Audit" } as Record<string, string>)[tab]}
+              {({ qr_display: "Location Attendance QR", kehadiran: "Attendance Summary", izin_cuti: "Leave Management", karyawan: "Manage Employees", lokasi: "Locations & QR", shift: "Work Shifts", perangkat: "Registered Devices", riwayat: "Attendance History", penggajian: "Payroll", kurs: "Exchange Rates", pengaturan: "Company Settings", log: "Audit Log" } as Record<string, string>)[tab]}
             </h1>
             <p className="text-xs text-muted-foreground">{fmtDate(now)}</p>
           </div>
@@ -928,13 +1065,13 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Settings */}
               <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-                <p className="font-semibold text-sm">Pengaturan QR Lokasi</p>
+                <p className="font-semibold text-sm">Location QR Settings</p>
 
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">Jenis Kode</label>
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { v: "static", label: "Statis", desc: "Permanen, cetak sekali", icon: <QrCode className="w-4 h-4" /> },
+                      { v: "static", label: "Statis", desc: "Permanent, print once", icon: <QrCode className="w-4 h-4" /> },
                       { v: "dynamic", label: "Dinamis", desc: "Berubah berkala, lebih aman", icon: <Zap className="w-4 h-4" /> },
                     ].map(({ v, label, desc, icon }) => (
                       <button key={v} onClick={() => setQrVariant(v as QRVariant)}
@@ -968,14 +1105,14 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
                 {qrVariant === "static" && (
                   <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200">
                     <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-amber-700">Kode statis berisiko disalahgunakan jika difoto dan digunakan dari luar lokasi. Pertimbangkan QR dinamis + verifikasi GPS.</p>
+                    <p className="text-xs text-amber-700">A static code can be misused if photographed and used from outside the location. Consider a dynamic QR + GPS verification.</p>
                   </div>
                 )}
 
                 {qrVariant === "dynamic" && (
                   <div className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-emerald-700">Kode dinamis lebih aman karena hanya valid selama interval yang ditentukan. Disarankan untuk ditampilkan di layar monitor pintu masuk.</p>
+                    <p className="text-xs text-emerald-700">A dynamic code is safer because it's only valid for the set interval. Recommended for display on an entrance monitor.</p>
                   </div>
                 )}
               </div>
@@ -984,12 +1121,12 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
               <div className="bg-card rounded-xl border border-border p-5 flex flex-col items-center gap-4">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground self-start">
                   <Monitor className="w-3.5 h-3.5" />
-                  <span>Pratinjau tampilan di pintu masuk</span>
+                  <span>Entrance display preview</span>
                 </div>
 
                 <div className="bg-[#1B3D72] rounded-2xl p-5 w-full flex flex-col items-center gap-3">
                   <p className="text-white/80 text-xs font-semibold uppercase tracking-widest">{companyName || "—"}</p>
-                  <p className="text-white font-bold text-sm">{pubLoc?.name || "Belum ada lokasi/QR aktif"}</p>
+                  <p className="text-white font-bold text-sm">{pubLoc?.name || "No active location/QR"}</p>
 
                   {pubLoc?.qrImageUrl ? (
                     <div className="relative bg-white rounded-xl p-3 shadow-lg">
@@ -999,16 +1136,16 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
                       )}
                     </div>
                   ) : (
-                    <div className="w-[160px] h-[160px] bg-white/10 rounded-xl flex items-center justify-center text-white/40 text-[11px] text-center p-4">Buat QR dulu di tab<br/>"Lokasi & QR"</div>
+                    <div className="w-[160px] h-[160px] bg-white/10 rounded-xl flex items-center justify-center text-white/40 text-[11px] text-center p-4">Create a QR first in the<br/>"Locations & QR" tab</div>
                   )}
 
                   {pubLoc?.type === "qr_dynamic" && pubLoc.serial != null ? (
-                    <p className="text-white text-xs font-semibold">Nomor Seri #{pubLoc.serial} · sekali pakai</p>
+                    <p className="text-white text-xs font-semibold">Nomor Seri #{pubLoc.serial}· single-use</p>
                   ) : pubLoc?.type === "qr_static" ? (
                     <p className="text-white/50 text-xs">Kode Statis — tetap</p>
                   ) : null}
 
-                  <p className="text-white/40 text-[10px] font-mono">Sinkron langsung dari server · pindai dgn app karyawan</p>
+                  <p className="text-white/40 text-[10px] font-mono">Synced live from the server · scan with the employee app</p>
                 </div>
               </div>
             </div>
@@ -1016,64 +1153,16 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
 
           {/* Attendance Tab */}
           {tab === "kehadiran" && (
-            <>
-              <div className="grid grid-cols-4 gap-3">
-                {[
-                  { label: "Hadir", v: stats.hadir, color: "text-emerald-600 bg-emerald-50 border-emerald-100", icon: <UserCheck className="w-4 h-4" /> },
-                  { label: "Terlambat", v: stats.terlambat, color: "text-amber-600 bg-amber-50 border-amber-100", icon: <Timer className="w-4 h-4" /> },
-                  { label: "Izin/Cuti", v: stats.izin, color: "text-blue-600 bg-blue-50 border-blue-100", icon: <FileText className="w-4 h-4" /> },
-                  { label: "Tidak Hadir", v: stats.tidakHadir, color: "text-red-600 bg-red-50 border-red-100", icon: <UserX className="w-4 h-4" /> },
-                ].map(({ label, v, color, icon }) => (
-                  <div key={label} className="bg-card rounded-xl border border-border p-3 flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center border ${color}`}>{icon}</div>
-                    <div><p className="text-xl font-bold tabular-nums">{v}</p><p className="text-xs text-muted-foreground">{label}</p></div>
-                  </div>
-                ))}
-              </div>
-              <div className="bg-card rounded-xl border border-border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-border bg-muted/30">
-                    {["Karyawan", "Tanggal", "Check-In", "Check-Out", "Status", "Metode"].map(h => (
-                      <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
-                    ))}
-                  </tr></thead>
-                  <tbody className="divide-y divide-border">
-                    {attendance.map(rec => {
-                      const emp = empName(rec.employeeId);
-                      const nm = emp?.name ?? rec.employeeId;
-                      const dept = emp?.department ?? "—";
-                      return (
-                        <tr key={rec.id} className="hover:bg-muted/20 transition-colors">
-                          <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-2">
-                              <Avatar initials={initials(nm)} size="sm" />
-                              <div>
-                                <p className="font-semibold text-sm">{nm}</p>
-                                <p className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${DEPT_COLORS[dept] ?? "bg-muted text-foreground"} inline-block`}>{dept}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-2.5"><span className="font-mono text-xs text-muted-foreground">{rec.date ? new Date(rec.date + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</span></td>
-                          <td className="px-4 py-2.5"><span className={`font-mono text-sm ${rec.checkIn ? "font-semibold" : "text-muted-foreground"}`}>{rec.checkIn ?? "—"}</span></td>
-                          <td className="px-4 py-2.5"><span className={`font-mono text-sm ${rec.checkOut ? "font-semibold" : "text-muted-foreground"}`}>{rec.checkOut ?? "—"}</span></td>
-                          <td className="px-4 py-2.5"><StatusBadge status={rec.status} /></td>
-                          <td className="px-4 py-2.5"><MethodBadge method={rec.method} /></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
+            <RekapKehadiranTab token={token!} attendance={attendance} employees={employees} />
           )}
 
           {/* Leave Tab */}
           {tab === "izin_cuti" && (
             <div className="space-y-3">
               {leaveRequests.length === 0 && (
-                <p className="text-center text-muted-foreground text-sm py-8">Belum ada pengajuan izin/cuti.</p>
+                <p className="text-center text-muted-foreground text-sm py-8">No leave requests yet.</p>
               )}
-              {leaveRequests.map(req => {
+              {leavePg.pageItems.map(req => {
                 const emp = empName(req.employeeId);
                 const nm = emp?.name ?? req.employeeId;
                 return (
@@ -1085,7 +1174,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
                           <p className="font-bold text-sm">{nm}</p>
                           <p className="text-xs text-muted-foreground">{emp?.position ?? "—"}</p>
                           <div className="flex items-center gap-2 mt-1.5">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${req.type === "cuti" ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-blue-100 text-blue-700 border-blue-200"}`}>{req.type === "cuti" ? "Cuti" : "Izin"}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${req.type === "cuti" ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-blue-100 text-blue-700 border-blue-200"}`}>{req.type === "cuti" ? "Leave" : "Permission"}</span>
                             <span className="text-xs text-muted-foreground font-mono">{req.startDate === req.endDate ? req.startDate : `${req.startDate} – ${req.endDate}`}</span>
                           </div>
                           <p className="text-sm mt-1.5 italic text-muted-foreground">&ldquo;{req.reason}&rdquo;</p>
@@ -1094,8 +1183,8 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
                       <div className="flex-shrink-0">
                         {req.status === "pending" ? (
                           <div className="flex gap-2">
-                            <button onClick={() => approve(req.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold hover:bg-emerald-100 transition-colors"><Check className="w-3.5 h-3.5" />Setujui</button>
-                            <button onClick={() => reject(req.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-50 text-red-700 border border-red-200 text-xs font-semibold hover:bg-red-100 transition-colors"><X className="w-3.5 h-3.5" />Tolak</button>
+                            <button onClick={() => approve(req.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold hover:bg-emerald-100 transition-colors"><Check className="w-3.5 h-3.5" />Approve</button>
+                            <button onClick={() => reject(req.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-50 text-red-700 border border-red-200 text-xs font-semibold hover:bg-red-100 transition-colors"><X className="w-3.5 h-3.5" />Reject</button>
                           </div>
                         ) : (
                           <span className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${req.status === "approved" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-red-100 text-red-700 border-red-200"}`}>{req.status === "approved" ? "Disetujui" : "Ditolak"}</span>
@@ -1105,6 +1194,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
                   </div>
                 );
               })}
+              <Pagination page={leavePg.page} totalPages={leavePg.totalPages} total={leavePg.total} from={leavePg.from} to={leavePg.to} onPage={leavePg.setPage} />
             </div>
           )}
 
@@ -1147,6 +1237,21 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
+  // Search + pagination (client-side; data karyawan sudah dimuat penuh).
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const q = search.trim().toLowerCase();
+  const filtered = employees.filter(e => {
+    if (statusFilter !== "all" && e.status !== statusFilter) return false;
+    if (!q) return true;
+    return e.name.toLowerCase().includes(q)
+      || (e.employeeId || "").toLowerCase().includes(q)
+      || (e.position || "").toLowerCase().includes(q)
+      || (e.department || "").toLowerCase().includes(q)
+      || (e.email || "").toLowerCase().includes(q);
+  });
+  const { page: curPage, setPage, totalPages, total, from, to, pageItems } = usePagination(filtered);
 
   const openAdd = () => { setEditId(null); setForm(EMPTY); setErr(""); setMode("form"); };
   const openEdit = (e: ApiEmployee) => {
@@ -1156,73 +1261,106 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
     setErr(""); setMode("form");
   };
   const save = async () => {
-    if (!form.name?.trim()) { setErr("Nama wajib diisi"); return; }
-    setBusy(true); setErr("");
+    const parsed = employeeSchema.safeParse(form);
+    if (!parsed.success) { setFieldErr(zodErrors(parsed.error)); setErr("Please fix the highlighted fields."); return; }
+    setFieldErr({}); setBusy(true); setErr("");
     try {
       if (editId) await onUpdate(editId, form); else await onCreate(form);
       setMode("list");
-    } catch (e: any) { setErr(e?.message || "Gagal menyimpan"); }
+    } catch (e: any) { setErr(e?.message || "Failed to save"); }
     finally { setBusy(false); }
   };
   const doDelete = async (id: string) => {
     setBusy(true); setErr("");
     try { await onDelete(id, false); setConfirmId(null); }
-    catch (e: any) { setErr(e?.message || "Gagal menghapus"); }
+    catch (e: any) { setErr(e?.message || "Failed to delete"); }
     finally { setBusy(false); }
   };
   const doReset = async (id: string) => {
     setBusy(true); setErr("");
-    try { await onResetCode(id); } catch (e: any) { setErr(e?.message || "Gagal reset kode"); }
+    try { await onResetCode(id); } catch (e: any) { setErr(e?.message || "Failed to reset code"); }
     finally { setBusy(false); }
+  };
+  // Bulk import CSV — parse di klien lalu pakai createEmployee per baris (logika teruji).
+  const [importMsg, setImportMsg] = useState("");
+  const downloadTemplate = () => downloadText("template-karyawan.csv", toCsv(
+    ["name", "email", "position", "department", "schedule_in", "schedule_out", "base_salary", "pin"],
+    [["Budi Santoso", "budi@perusahaan.id", "Staff IT", "Teknologi", "08:00", "17:00", "5000000", "123456"]]));
+  const handleImport = async (file: File | null) => {
+    if (!file) return;
+    setImportMsg(""); setErr("");
+    let rows: string[][];
+    try { rows = parseCsvRows(await file.text()); } catch { setErr("Failed to read CSV file"); return; }
+    if (rows.length < 2) { setErr("CSV has no data rows (needs a header + at least 1 row)."); return; }
+    const header = rows[0].map(h => h.trim().toLowerCase());
+    const col = (k: string) => header.indexOf(k);
+    if (col("name") < 0) { setErr('CSV must have a "name" column. Download the template for reference.'); return; }
+    let ok = 0, gagal = 0; const errs: string[] = [];
+    setBusy(true);
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const g = (k: string) => { const j = col(k); return j >= 0 ? (r[j] ?? "").trim() : ""; };
+      const name = g("name");
+      if (!name) { gagal++; continue; }
+      try {
+        await onCreate({ name, email: g("email"), position: g("position"), department: g("department"),
+          schedule_in: g("schedule_in") || "08:00", schedule_out: g("schedule_out") || "17:00",
+          password: g("pin") || g("password"), base_salary: Number(g("base_salary")) || 0 });
+        ok++;
+      } catch (e: any) { gagal++; if (errs.length < 3) errs.push(`${name}: ${e?.message || "failed"}`); }
+    }
+    setBusy(false);
+    setImportMsg(`Import done: ${ok} succeeded${gagal ? `, ${gagal} failed` : ""}.${errs.length ? " — " + errs.join("; ") : ""}`);
   };
 
   const field = (label: string, key: keyof EmployeeInput, type = "text", placeholder = "") => (
     <div>
       <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">{label}</label>
       <input type={type} value={(form[key] as string) ?? ""} placeholder={placeholder}
-        onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-        className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+        onChange={e => { setForm(f => ({ ...f, [key]: e.target.value })); if (fieldErr[key]) setFieldErr(fe => { const n = { ...fe }; delete n[key]; return n; }); }}
+        className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 ${fieldErr[key] ? "border-red-400 focus:ring-red-200" : "border-border focus:ring-primary/30"}`} />
+      {fieldErr[key] && <p className="text-[11px] text-red-600 mt-1">{fieldErr[key]}</p>}
     </div>
   );
 
   if (mode === "form") return (
     <div className="bg-card rounded-xl border border-border p-5 max-w-2xl space-y-4">
-      <p className="font-semibold text-sm">{editId ? "Edit Karyawan" : "Tambah Karyawan"}</p>
+      <p className="font-semibold text-sm">{editId ? "Edit Employee" : "Add Employee"}</p>
       {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
       <div className="grid grid-cols-2 gap-3">
-        {field("Nama", "name", "text", "Nama lengkap")}
-        {field("Email", "email", "email", "nama@perusahaan.co.id")}
-        {field("Posisi", "position", "text", "mis. Staff IT")}
-        {field("Departemen", "department", "text", "mis. Teknologi Informasi")}
-        {field("Jam Masuk", "schedule_in", "time")}
-        {field("Jam Keluar", "schedule_out", "time")}
+        {field("Name", "name", "text", "Full name")}
+        {field("Email", "email", "email", "name@company.com")}
+        {field("Position", "position", "text", "e.g. IT Staff")}
+        {field("Department", "department", "text", "e.g. Information Technology")}
+        {field("Clock-in", "schedule_in", "time")}
+        {field("Clock-out", "schedule_out", "time")}
       </div>
       <div>
-        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Gaji Pokok</label>
-        <input type="number" value={form.base_salary ?? 0} placeholder="mis. 5000000"
+        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Base Salary</label>
+        <input type="number" value={form.base_salary ?? 0} placeholder="e.g. 5000000"
           onChange={e => setForm(f => ({ ...f, base_salary: Number(e.target.value) || 0 }))}
           className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
       </div>
       <div>
-        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">PIN / Password Login Karyawan</label>
-        <input type="text" value={form.password ?? ""} placeholder={editId ? "Kosongkan jika tidak diubah" : "mis. 123456 — untuk login app karyawan"}
+        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Employee Login PIN / Password</label>
+        <input type="text" value={form.password ?? ""} placeholder={editId ? "Leave blank to keep current" : "e.g. 123456 — for the employee app login"}
           onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
           className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
-        <p className="text-[11px] text-muted-foreground mt-1">{editId ? "Isi untuk mengganti PIN karyawan." : "Tanpa PIN, karyawan tidak bisa login di app & absen."}</p>
+        <p className="text-[11px] text-muted-foreground mt-1">{editId ? "Fill in to change the employee's PIN." : "Without a PIN, the employee can't sign in or check attendance."}</p>
       </div>
       {editId && (
         <div>
           <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Status</label>
           <select value={form.status ?? "active"} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
             className="w-full px-3 py-2 rounded-lg border border-border text-sm">
-            <option value="active">Aktif</option>
-            <option value="inactive">Nonaktif</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
           </select>
         </div>
       )}
       <div className="flex gap-2 pt-1">
-        <button disabled={busy} onClick={save} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"><Check className="w-4 h-4" />{busy ? "Menyimpan…" : "Simpan"}</button>
-        <button disabled={busy} onClick={() => setMode("list")} className="px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40">Batal</button>
+        <button disabled={busy} onClick={save} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"><Check className="w-4 h-4" />{busy ? "Saving…" : "Save"}</button>
+        <button disabled={busy} onClick={() => setMode("list")} className="px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40">Cancel</button>
       </div>
     </div>
   );
@@ -1230,22 +1368,44 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{employees.length} karyawan terdaftar</p>
-        <button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"><UserCheck className="w-4 h-4" />Tambah Karyawan</button>
+        <p className="text-sm text-muted-foreground">{filtered.length} of {employees.length} employees{q || statusFilter !== "all" ? " (filtered)" : ""}</p>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadTemplate} className="text-xs font-semibold text-primary hover:underline">CSV Template</button>
+          <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40 cursor-pointer">
+            <Download className="w-4 h-4 rotate-180" />Import CSV
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={e => { handleImport(e.target.files?.[0] || null); e.currentTarget.value = ""; }} />
+          </label>
+          <button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"><UserCheck className="w-4 h-4" />Add Employee</button>
+        </div>
+      </div>
+      {importMsg && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs"><CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />{importMsg}</div>}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Search name, ID, position, department, email…"
+            className="w-full pl-9 pr-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+        </div>
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as any); setPage(1); }}
+          className="px-3 py-2 rounded-lg border border-border text-sm bg-card">
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
       </div>
       {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
       <div className="bg-card rounded-xl border border-border overflow-hidden">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border bg-muted/30">
-            {["Karyawan", "Departemen", "Jadwal", "Status", "QR / PIN", "Aksi"].map(h => (
+            {["Employee", "Department", "Schedule", "Status", "QR / PIN", "Actions"].map(h => (
               <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
             ))}
           </tr></thead>
           <tbody className="divide-y divide-border">
-            {employees.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">Belum ada karyawan. Klik "Tambah Karyawan".</td></tr>
+            {filtered.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">{employees.length === 0 ? 'No employees yet. Click "Add Employee".' : "No employees match your search/filter."}</td></tr>
             )}
-            {employees.map(e => (
+            {pageItems.map(e => (
               <tr key={e.employeeId} className="hover:bg-muted/20 transition-colors">
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-2">
@@ -1258,7 +1418,7 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
                 </td>
                 <td className="px-4 py-2.5"><span className="text-xs">{e.department || "—"}</span></td>
                 <td className="px-4 py-2.5"><span className="font-mono text-xs">{e.schedule.in ?? "—"}–{e.schedule.out ?? "—"}</span></td>
-                <td className="px-4 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${e.status === "active" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-muted text-muted-foreground border-border"}`}>{e.status === "active" ? "Aktif" : "Nonaktif"}</span></td>
+                <td className="px-4 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${e.status === "active" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-muted text-muted-foreground border-border"}`}>{e.status === "active" ? "Active" : "Inactive"}</span></td>
                 <td className="px-4 py-2.5">
                   <span className={`text-[11px] block ${e.barcode ? "text-emerald-600" : "text-muted-foreground"}`}>QR {e.barcode ? "✓" : "—"}</span>
                   <span className={`text-[11px] block ${e.has_pin ? "text-emerald-600" : "text-amber-600"}`}>PIN {e.has_pin ? "✓" : "✗"}</span>
@@ -1266,15 +1426,15 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
                 <td className="px-4 py-2.5">
                   {confirmId === e.employeeId ? (
                     <span className="flex items-center gap-1.5">
-                      <span className="text-xs text-red-600">Hapus?</span>
-                      <button disabled={busy} onClick={() => doDelete(e.employeeId)} className="text-xs font-semibold text-red-700 hover:underline">Ya</button>
-                      <button onClick={() => setConfirmId(null)} className="text-xs text-muted-foreground hover:underline">Batal</button>
+                      <span className="text-xs text-red-600">Delete?</span>
+                      <button disabled={busy} onClick={() => doDelete(e.employeeId)} className="text-xs font-semibold text-red-700 hover:underline">Yes</button>
+                      <button onClick={() => setConfirmId(null)} className="text-xs text-muted-foreground hover:underline">Cancel</button>
                     </span>
                   ) : (
                     <span className="flex items-center gap-2">
                       <button onClick={() => openEdit(e)} title="Edit" className="text-muted-foreground hover:text-primary"><FileText className="w-4 h-4" /></button>
-                      <button disabled={busy} onClick={() => doReset(e.employeeId)} title="Reset kode" className="text-muted-foreground hover:text-amber-600"><QrCode className="w-4 h-4" /></button>
-                      <button onClick={() => setConfirmId(e.employeeId)} title="Hapus" className="text-muted-foreground hover:text-red-600"><X className="w-4 h-4" /></button>
+                      <button disabled={busy} onClick={() => doReset(e.employeeId)} title="Reset code" className="text-muted-foreground hover:text-amber-600"><QrCode className="w-4 h-4" /></button>
+                      <button onClick={() => setConfirmId(e.employeeId)} title="Delete" className="text-muted-foreground hover:text-red-600"><X className="w-4 h-4" /></button>
                     </span>
                   )}
                 </td>
@@ -1283,12 +1443,13 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
           </tbody>
         </table>
       </div>
+      <Pagination page={curPage} totalPages={totalPages} total={total} from={from} to={to} onPage={setPage} />
     </div>
   );
 }
 
 // Modul Lokasi & QR (admin): daftar + tambah lokasi (koordinat GPS asli) + buat
-// QR dinamis. "Pakai lokasi saya" mengisi koordinat dari GPS perangkat admin.
+// QR dinamis. "Use my location" mengisi koordinat dari GPS perangkat admin.
 function LokasiTab({ token, locations, onCreate }: {
   token: string;
   locations: ApiLocation[];
@@ -1305,51 +1466,62 @@ function LokasiTab({ token, locations, onCreate }: {
   const useMyGps = async () => {
     setErr("");
     try { const g = await getDeviceGps(); setForm(f => ({ ...f, lat: g.lat, lng: g.lng })); }
-    catch (e: any) { setErr(e?.message || "Gagal ambil GPS"); }
+    catch (e: any) { setErr(e?.message || "Failed to get GPS"); }
   };
   const save = async () => {
-    if (!form.name?.trim()) { setErr("Nama lokasi wajib"); return; }
+    const parsed = locationSchema.safeParse(form);
+    if (!parsed.success) { setErr(Object.values(zodErrors(parsed.error))[0] || "Invalid input"); return; }
     setBusy(true); setErr("");
     try { await onCreate({ ...form, radius_m: Number(form.radius_m) || 100 }); setMode("list"); }
-    catch (e: any) { setErr(e?.message || "Gagal menyimpan"); }
+    catch (e: any) { setErr(e?.message || "Failed to save"); }
     finally { setBusy(false); }
   };
   const genDynamic = async (locId: string) => {
     setBusy(true); setErr("");
     try { const r = await api.createDynamicCode(token, locId, "hourly"); setQr({ loc: locId, url: r.qrImageUrl, codeId: r.codeId, type: "dynamic" }); }
-    catch (e: any) { setErr(e?.message || "Gagal membuat QR"); } finally { setBusy(false); }
+    catch (e: any) { setErr(e?.message || "Failed to create QR"); } finally { setBusy(false); }
   };
   const genStatic = async (locId: string) => {
     setBusy(true); setErr("");
     try { const r = await api.createStaticCode(token, locId); setQr({ loc: locId, url: r.qrImageUrl, codeId: r.codeId, type: "static" }); }
-    catch (e: any) { setErr(e?.message || "Gagal membuat QR"); } finally { setBusy(false); }
+    catch (e: any) { setErr(e?.message || "Failed to create QR"); } finally { setBusy(false); }
   };
   const refreshQr = async () => {
     if (!qr) return; setBusy(true); setErr("");
     try { const r = await api.refreshCode(token, qr.loc, qr.codeId); setQr({ ...qr, url: r.qrImageUrl }); }
-    catch (e: any) { setErr(e?.message || "Gagal refresh"); } finally { setBusy(false); }
+    catch (e: any) { setErr(e?.message || "Failed to refresh"); } finally { setBusy(false); }
   };
   const deactivateQr = async () => {
     if (!qr) return; setBusy(true); setErr("");
     try { await api.updateCode(token, qr.loc, qr.codeId, { status: "inactive" }); setQr(null); setErr("Kode dinonaktifkan."); }
-    catch (e: any) { setErr(e?.message || "Gagal menonaktifkan"); } finally { setBusy(false); }
+    catch (e: any) { setErr(e?.message || "Failed to deactivate"); } finally { setBusy(false); }
   };
 
   if (mode === "form") return (
     <div className="bg-card rounded-xl border border-border p-5 max-w-xl space-y-3">
-      <p className="font-semibold text-sm">Tambah Lokasi Absensi</p>
+      <p className="font-semibold text-sm">Add Attendance Location</p>
       {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Nama Lokasi</label><input className={inputCls} placeholder="mis. Kantor Pusat" value={form.name ?? ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Alamat</label><input className={inputCls} placeholder="Alamat lokasi" value={form.address ?? ""} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
+      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Location Name</label><input className={inputCls} placeholder="e.g. Head Office" value={form.name ?? ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Address</label><input className={inputCls} placeholder="Location address" value={form.address ?? ""} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
       <div className="grid grid-cols-2 gap-3">
         <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Latitude</label><input className={inputCls} type="number" step="any" placeholder="-6.2088" value={form.lat ?? ""} onChange={e => setForm(f => ({ ...f, lat: e.target.value === "" ? null : Number(e.target.value) }))} /></div>
         <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Longitude</label><input className={inputCls} type="number" step="any" placeholder="106.8456" value={form.lng ?? ""} onChange={e => setForm(f => ({ ...f, lng: e.target.value === "" ? null : Number(e.target.value) }))} /></div>
       </div>
-      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Radius validasi (meter)</label><input className={inputCls} type="number" placeholder="100" value={form.radius_m ?? 100} onChange={e => setForm(f => ({ ...f, radius_m: Number(e.target.value) }))} /></div>
-      <button onClick={useMyGps} className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"><MapPin className="w-3.5 h-3.5" />Pakai koordinat GPS saya sekarang</button>
+      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Validation radius (meters)</label><input className={inputCls} type="number" placeholder="100" value={form.radius_m ?? 100} onChange={e => setForm(f => ({ ...f, radius_m: Number(e.target.value) }))} /></div>
+      <button onClick={useMyGps} className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"><MapPin className="w-3.5 h-3.5" />Use my GPS coordinates now</button>
+      {form.lat != null && form.lng != null && (
+        <div className="rounded-lg overflow-hidden border border-border">
+          <iframe title="Location map preview" className="w-full h-44 border-0" loading="lazy"
+            src={`https://www.openstreetmap.org/export/embed.html?bbox=${form.lng - 0.004}%2C${form.lat - 0.004}%2C${form.lng + 0.004}%2C${form.lat + 0.004}&layer=mapnik&marker=${form.lat}%2C${form.lng}`} />
+          <div className="flex items-center justify-between px-3 py-2 bg-muted/30 text-[11px]">
+            <span className="text-muted-foreground">Geofence radius: <b className="text-foreground">{form.radius_m || 100} m</b> from this point</span>
+            <a href={`https://www.openstreetmap.org/?mlat=${form.lat}&mlon=${form.lng}#map=18/${form.lat}/${form.lng}`} target="_blank" rel="noreferrer" className="text-primary font-semibold hover:underline">Open map ↗</a>
+          </div>
+        </div>
+      )}
       <div className="flex gap-2 pt-1">
-        <button disabled={busy} onClick={save} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"><Check className="w-4 h-4" />{busy ? "Menyimpan…" : "Simpan"}</button>
-        <button disabled={busy} onClick={() => setMode("list")} className="px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40">Batal</button>
+        <button disabled={busy} onClick={save} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"><Check className="w-4 h-4" />{busy ? "Saving…" : "Save"}</button>
+        <button disabled={busy} onClick={() => setMode("list")} className="px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40">Cancel</button>
       </div>
     </div>
   );
@@ -1358,10 +1530,10 @@ function LokasiTab({ token, locations, onCreate }: {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{locations.length} lokasi terdaftar</p>
-        <button onClick={() => { setForm(EMPTY); setErr(""); setMode("form"); }} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"><MapPin className="w-4 h-4" />Tambah Lokasi</button>
+        <button onClick={() => { setForm(EMPTY); setErr(""); setMode("form"); }} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"><MapPin className="w-4 h-4" />Add Location</button>
       </div>
       {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      {locations.length === 0 && <p className="text-center text-muted-foreground text-sm py-8">Belum ada lokasi. Tambah kantor + koordinat GPS-nya agar validasi radius berfungsi.</p>}
+      {locations.length === 0 && <p className="text-center text-muted-foreground text-sm py-8">No locations yet. Add an office + its GPS coordinates so radius validation works.</p>}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {locations.map(l => (
           <div key={l.locationId} className="bg-card rounded-xl border border-border p-4">
@@ -1369,21 +1541,22 @@ function LokasiTab({ token, locations, onCreate }: {
               <div>
                 <p className="font-bold text-sm">{l.name}</p>
                 <p className="text-xs text-muted-foreground">{l.address || "—"}</p>
-                <p className="text-[11px] font-mono text-muted-foreground mt-1">{l.lat != null && l.lng != null ? `${l.lat}, ${l.lng}` : "GPS belum diset"} · radius {l.radius_m}m</p>
+                <p className="text-[11px] font-mono text-muted-foreground mt-1">{l.lat != null && l.lng != null ? `${l.lat}, ${l.lng}` : "GPS not set"} · radius {l.radius_m}m
+                  {l.lat != null && l.lng != null && <a href={`https://www.openstreetmap.org/?mlat=${l.lat}&mlon=${l.lng}#map=18/${l.lat}/${l.lng}`} target="_blank" rel="noreferrer" className="ml-2 text-primary font-semibold hover:underline not-italic">Peta ↗</a>}</p>
               </div>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">{l.type}</span>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <button disabled={busy} onClick={() => genDynamic(l.locationId)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 disabled:opacity-50"><Zap className="w-3.5 h-3.5" />QR Dinamis</button>
-              <button disabled={busy} onClick={() => genStatic(l.locationId)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted text-foreground text-xs font-semibold hover:bg-muted/70 disabled:opacity-50"><QrCode className="w-3.5 h-3.5" />QR Statis</button>
+              <button disabled={busy} onClick={() => genDynamic(l.locationId)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 disabled:opacity-50"><Zap className="w-3.5 h-3.5" />Dynamic QR</button>
+              <button disabled={busy} onClick={() => genStatic(l.locationId)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted text-foreground text-xs font-semibold hover:bg-muted/70 disabled:opacity-50"><QrCode className="w-3.5 h-3.5" />Static QR</button>
             </div>
             {qr?.loc === l.locationId && (
               <div className="mt-3 flex flex-col items-center gap-2">
                 <img src={qr.url} alt="QR lokasi" width={140} height={140} className="rounded border border-border" />
-                <p className="text-[10px] text-muted-foreground text-center">QR {qr.type === "dynamic" ? "dinamis" : "statis"} aktif — tampilkan/tempel di pintu masuk</p>
+                <p className="text-[10px] text-muted-foreground text-center">{qr.type === "dynamic" ? "Dynamic" : "Static"} QR active — show/post at the entrance</p>
                 <div className="flex gap-2">
                   {qr.type === "dynamic" && <button disabled={busy} onClick={refreshQr} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-[11px] font-semibold hover:bg-muted/40"><RefreshCw className="w-3 h-3" />Refresh</button>}
-                  <button disabled={busy} onClick={deactivateQr} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-200 text-red-600 text-[11px] font-semibold hover:bg-red-50"><X className="w-3 h-3" />Nonaktifkan</button>
+                  <button disabled={busy} onClick={deactivateQr} className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-200 text-red-600 text-[11px] font-semibold hover:bg-red-50"><X className="w-3 h-3" />Deactivate</button>
                 </div>
               </div>
             )}
@@ -1403,32 +1576,34 @@ function ShiftTab({ token }: { token: string }) {
   const dirty = editId !== null || form.name.trim() !== "";
   const { data, error: loadErr, reload } = usePolledData(() => api.shifts(token), { paused: dirty });
   const items = data ?? [];
+  const pg = usePagination(items);
   const reset = () => { setForm({ name: "", start: "08:00", end: "17:00" }); setEditId(null); };
   const save = async () => {
-    if (!form.name.trim()) { setErr("Nama shift wajib"); return; }
+    { const parsed = shiftSchema.safeParse(form); if (!parsed.success) { setErr(Object.values(zodErrors(parsed.error))[0] || "Invalid input"); return; } }
     setBusy(true); setErr("");
     try { if (editId) await api.updateShift(token, editId, form); else await api.createShift(token, form); reset(); reload(); }
-    catch (e: any) { setErr(e?.message || "Gagal"); } finally { setBusy(false); }
+    catch (e: any) { setErr(e?.message || "Failed"); } finally { setBusy(false); }
   };
-  const del = async (id: string) => { setErr(""); try { await api.deleteShift(token, id); if (editId === id) reset(); reload(); } catch (e: any) { setErr(e?.message || "Gagal hapus"); } };
+  const del = async (id: string) => { setErr(""); try { await api.deleteShift(token, id); if (editId === id) reset(); reload(); } catch (e: any) { setErr(e?.message || "Failed to delete"); } };
   const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
-    <div className="space-y-3 max-w-2xl">
+    <div className="space-y-3">
       {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
       <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Nama Shift</label><input className={inputCls} placeholder="mis. Pagi" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Mulai</label><input type="time" className={inputCls} value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value }))} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Selesai</label><input type="time" className={inputCls} value={form.end} onChange={e => setForm(f => ({ ...f, end: e.target.value }))} /></div>
-        <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">{editId ? "Update" : "Tambah"}</button>
-        {editId && <button onClick={reset} className="px-3 py-2 rounded-lg border border-border text-sm">Batal</button>}
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Shift Name</label><input className={inputCls} placeholder="e.g. Morning" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Start</label><input type="time" className={inputCls} value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value }))} /></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">End</label><input type="time" className={inputCls} value={form.end} onChange={e => setForm(f => ({ ...f, end: e.target.value }))} /></div>
+        <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">{editId ? "Update" : "Add"}</button>
+        {editId && <button onClick={reset} className="px-3 py-2 rounded-lg border border-border text-sm">Cancel</button>}
       </div>
       <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Shift", "Mulai", "Selesai", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Shift", "Start", "End", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
           <tbody className="divide-y divide-border">
-            {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground text-sm">Belum ada shift.</td></tr>}
-            {items.map(s => <tr key={s.shiftId} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{s.name}</td><td className="px-4 py-2.5 font-mono">{s.start}</td><td className="px-4 py-2.5 font-mono">{s.end}</td><td className="px-4 py-2.5 flex gap-3"><button onClick={() => { setEditId(s.shiftId); setForm({ name: s.name, start: s.start, end: s.end }); }} className="text-primary text-xs hover:underline">Edit</button><button onClick={() => del(s.shiftId)} className="text-red-600 text-xs hover:underline">Hapus</button></td></tr>)}
+            {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground text-sm">No shifts yet.</td></tr>}
+            {pg.pageItems.map(s => <tr key={s.shiftId} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{s.name}</td><td className="px-4 py-2.5 font-mono">{s.start}</td><td className="px-4 py-2.5 font-mono">{s.end}</td><td className="px-4 py-2.5 flex gap-3"><button onClick={() => { setEditId(s.shiftId); setForm({ name: s.name, start: s.start, end: s.end }); }} className="text-primary text-xs hover:underline">Edit</button><button onClick={() => del(s.shiftId)} className="text-red-600 text-xs hover:underline">Delete</button></td></tr>)}
           </tbody></table>
       </div>
+      <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} />
     </div>
   );
 }
@@ -1441,36 +1616,208 @@ function DeviceTab({ token, employees }: { token: string; employees: ApiEmployee
   const dirty = !!form.employeeId || form.deviceId.trim() !== "";
   const { data, error: loadErr, reload } = usePolledData(() => api.devices(token), { paused: dirty });
   const items = data ?? [];
+  const pg = usePagination(items);
   const save = async () => {
-    if (!form.employeeId || !form.deviceId.trim()) { setErr("Karyawan & ID perangkat wajib"); return; }
+    if (!form.employeeId || !form.deviceId.trim()) { setErr("Employee & device ID are required"); return; }
     setBusy(true); setErr("");
     try { await api.createDevice(token, form); setForm({ employeeId: "", deviceId: "", label: "" }); reload(); }
-    catch (e: any) { setErr(e?.message || "Gagal"); } finally { setBusy(false); }
+    catch (e: any) { setErr(e?.message || "Failed"); } finally { setBusy(false); }
   };
-  const del = async (id: string) => { setErr(""); try { await api.deleteDevice(token, id); reload(); } catch (e: any) { setErr(e?.message || "Gagal hapus"); } };
+  const del = async (id: string) => { setErr(""); try { await api.deleteDevice(token, id); reload(); } catch (e: any) { setErr(e?.message || "Failed to delete"); } };
   const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
-    <div className="space-y-3 max-w-2xl">
+    <div className="space-y-3">
       {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
       <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Karyawan</label>
-          <select className={inputCls} value={form.employeeId} onChange={e => setForm(f => ({ ...f, employeeId: e.target.value }))}><option value="">Pilih…</option>{employees.map(e => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}</select></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">ID Perangkat</label><input className={inputCls} placeholder="device id / IMEI" value={form.deviceId} onChange={e => setForm(f => ({ ...f, deviceId: e.target.value }))} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Label</label><input className={inputCls} placeholder="mis. HP Budi" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} /></div>
-        <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Daftarkan</button>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Employee</label>
+          <select className={inputCls} value={form.employeeId} onChange={e => setForm(f => ({ ...f, employeeId: e.target.value }))}><option value="">Select…</option>{employees.map(e => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}</select></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Device ID</label><input className={inputCls} placeholder="device id / IMEI" value={form.deviceId} onChange={e => setForm(f => ({ ...f, deviceId: e.target.value }))} /></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Label</label><input className={inputCls} placeholder="e.g. John's phone" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} /></div>
+        <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Register</button>
       </div>
       <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Karyawan", "ID Perangkat", "Label", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Employee", "Device ID", "Label", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
           <tbody className="divide-y divide-border">
-            {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground text-sm">Belum ada perangkat terdaftar.</td></tr>}
-            {items.map(d => { const e = employees.find(x => x.employeeId === d.employeeId); return <tr key={d.id} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{e?.name ?? d.employeeId}</td><td className="px-4 py-2.5 font-mono text-xs">{d.deviceId}</td><td className="px-4 py-2.5">{d.label ?? "—"}</td><td className="px-4 py-2.5"><button onClick={() => del(d.id)} className="text-red-600 text-xs hover:underline">Hapus</button></td></tr>; })}
+            {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground text-sm">No devices registered yet.</td></tr>}
+            {pg.pageItems.map(d => { const e = employees.find(x => x.employeeId === d.employeeId); return <tr key={d.id} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{e?.name ?? d.employeeId}</td><td className="px-4 py-2.5 font-mono text-xs">{d.deviceId}</td><td className="px-4 py-2.5">{d.label ?? "—"}</td><td className="px-4 py-2.5"><button onClick={() => del(d.id)} className="text-red-600 text-xs hover:underline">Delete</button></td></tr>; })}
           </tbody></table>
       </div>
+      <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} />
     </div>
   );
 }
 
 // Modul Riwayat presensi per karyawan (admin) — /api/employees/:id/attendance.
+// Util: unduh teks (CSV/dll) sebagai file via Blob — dipakai ekspor riwayat & gaji.
+function downloadText(filename: string, text: string, mime = "text/csv;charset=utf-8") {
+  const blob = new Blob(["﻿" + text], { type: mime }); // BOM agar Excel baca UTF-8
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function toCsv(headers: string[], rows: (string | number | null | undefined)[][]) {
+  const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  return [headers.map(esc).join(","), ...rows.map(r => r.map(esc).join(","))].join("\r\n");
+}
+// Parser CSV minimal tapi benar (dukung field ber-tanda kutip & koma di dalamnya).
+function parseCsvRows(text: string): string[][] {
+  const rows: string[][] = []; let row: string[] = []; let field = ""; let q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (c === "\r") { /* abaikan */ }
+    else field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ""));
+}
+// Durasi kerja dari jam masuk→keluar ("HH:MM") → " · Xj Ym" (lewat tengah malam aman).
+function workDur(inT?: string | null, outT?: string | null): string {
+  if (!inT || !outT) return "";
+  const [ih, im] = inT.split(":").map(Number);
+  const [oh, om] = outT.split(":").map(Number);
+  if ([ih, im, oh, om].some(n => Number.isNaN(n))) return "";
+  let mins = (oh * 60 + om) - (ih * 60 + im);
+  if (mins < 0) mins += 24 * 60;
+  return ` · ${Math.floor(mins / 60)}j ${mins % 60}m`;
+}
+
+// Menit telat dari jam check-in vs jadwal masuk ("HH:MM"); 0 bila tak telat.
+function lateMinOf(checkIn?: string | null, schedIn?: string | null): number {
+  if (!checkIn || !schedIn) return 0;
+  const [ch, cm] = checkIn.split(":").map(Number);
+  const [sh, sm] = schedIn.split(":").map(Number);
+  if ([ch, cm, sh, sm].some(n => Number.isNaN(n))) return 0;
+  const d = (ch * 60 + cm) - (sh * 60 + sm);
+  return d > 0 ? d : 0;
+}
+
+// Rekap Kehadiran — SATU tabel gabungan: status LIVE hari ini (telat saat check-in)
+// + rekap metrik bulan (sama dgn payroll). Klik baris → halaman detail harian.
+function RekapKehadiranTab({ token, attendance, employees }: { token: string; attendance: AttendanceRecord[]; employees: ApiEmployee[] }) {
+  const [period, setPeriod] = useState(() => localYM());
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof api.attendanceRecap>>["employees"]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailRows, setDetailRows] = useState<Array<{ date: string; check_in: string | null; check_out: string | null; status: string; method: string | null }>>([]);
+  const [detailBusy, setDetailBusy] = useState(false);
+
+  useEffect(() => {
+    setBusy(true); setErr("");
+    api.attendanceRecap(token, period).then(r => setRows(r.employees)).catch(e => setErr(e?.message || "Failed to load summary")).finally(() => setBusy(false));
+  }, [token, period]);
+  useEffect(() => {
+    if (!detailId) return;
+    setDetailBusy(true);
+    api.employeeAttendance(token, detailId, { start: `${period}-01`, end: `${period}-31` })
+      .then(setDetailRows).catch(() => setDetailRows([])).finally(() => setDetailBusy(false));
+  }, [detailId, period, token]);
+
+  const today = (id: string) => attendance.find(a => a.employeeId === id) || null;
+  const exportCsv = () => {
+    if (!rows.length) return;
+    const csv = toCsv(["Employee", "Department", "Today's Status", "Check-in Today", "Late Today (min)", "Days Worked", "Late Days", "Late Minutes", "Overtime Hours", "Absent Days", "Leave Days"],
+      rows.map(r => { const t = today(r.employeeId); return [r.name, r.department ?? "", t?.status ?? "belum", t?.checkIn ?? "", lateMinOf(t?.checkIn, r.schedule_in), r.days_worked, r.late_days, r.late_minutes, r.overtime_hours, r.absent_days, r.leave_days]; }));
+    downloadText(`rekap-kehadiran-${period}.csv`, csv);
+  };
+  const mainPg = usePagination(rows);       // tabel rekap utama (12/hal)
+  const detailPg = usePagination(detailRows); // tabel detail harian (12/hal)
+
+  // ── Halaman detail harian satu karyawan ──
+  if (detailId) {
+    const r = rows.find(x => x.employeeId === detailId);
+    return (
+      <div className="space-y-3">
+        <button onClick={() => setDetailId(null)} className="text-sm font-semibold text-primary hover:underline flex items-center gap-1">‹ Back to summary</button>
+        <div className="bg-card rounded-xl border border-border p-4">
+          <p className="font-bold">{r?.name ?? detailId}</p>
+          <p className="text-xs text-muted-foreground">{r?.position || "—"} · {r?.department || "—"} · schedule {r?.schedule_in ?? "—"}–{r?.schedule_out ?? "—"} · period {period}</p>
+          {r && <div className="flex flex-wrap gap-2 mt-2 text-xs">
+            <span className="px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Days worked: {r.days_worked}</span>
+            <span className="px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200">Late: {r.late_days} days · {r.late_minutes} min</span>
+            <span className="px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200">Absent: {r.absent_days} days</span>
+            <span className="px-2 py-1 rounded bg-blue-50 text-blue-700 border border-blue-200">Leave: {r.leave_days} days</span>
+          </div>}
+        </div>
+        <div className="bg-card rounded-xl border border-border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-border bg-muted/30">{["Date", "Check-in", "Check-out", "Status", "Late", "Duration"].map(h => <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+            <tbody className="divide-y divide-border">
+              {detailBusy && <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground text-sm">Loading…</td></tr>}
+              {!detailBusy && detailRows.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground text-sm">No attendance for this period.</td></tr>}
+              {detailPg.pageItems.map((d, i) => { const lm = lateMinOf(d.check_in, r?.schedule_in); return (
+                <tr key={i} className="hover:bg-muted/20">
+                  <td className="px-3 py-2.5 font-mono">{d.date}</td>
+                  <td className="px-3 py-2.5 font-mono">{d.check_in ?? "—"}</td>
+                  <td className="px-3 py-2.5 font-mono">{d.check_out ?? "—"}</td>
+                  <td className="px-3 py-2.5"><StatusBadge status={d.status as AttendanceRecord["status"]} /></td>
+                  <td className="px-3 py-2.5 font-mono">{lm > 0 ? <span className="text-orange-600 font-semibold">{lm} mnt</span> : "—"}</td>
+                  <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{workDur(d.check_in, d.check_out).replace(" · ", "")}</td>
+                </tr>
+              ); })}
+            </tbody>
+          </table>
+        </div>
+        <Pagination page={detailPg.page} totalPages={detailPg.totalPages} total={detailPg.total} from={detailPg.from} to={detailPg.to} onPage={detailPg.setPage} />
+      </div>
+    );
+  }
+
+  // ── Tabel gabungan (live + rekap) ──
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-end gap-2">
+          <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Period</label><input type="month" className="px-3 py-2 rounded-lg border border-border text-sm" value={period} onChange={e => setPeriod(e.target.value)} /></div>
+          {busy && <span className="text-xs text-muted-foreground pb-2">Loading…</span>}
+        </div>
+        <button disabled={!rows.length} onClick={exportCsv} className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40 disabled:opacity-40"><Download className="w-4 h-4" />Export CSV</button>
+      </div>
+      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+      <div className="bg-card rounded-xl border border-border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="border-b border-border bg-muted/30">
+            {["Employee", "Today's Status", "Check-in", "Late Today", "Days Worked", "Late (days)", "Late Min (mo)", "Absent", ""].map(h => <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground uppercase whitespace-nowrap">{h}</th>)}
+          </tr></thead>
+          <tbody className="divide-y divide-border">
+            {rows.length === 0 && !busy && <tr><td colSpan={9} className="px-3 py-8 text-center text-muted-foreground text-sm">No employees / data for this period.</td></tr>}
+            {mainPg.pageItems.map(r => {
+              const t = today(r.employeeId);
+              const lmToday = lateMinOf(t?.checkIn, r.schedule_in);
+              return (
+                <tr key={r.employeeId} className="hover:bg-muted/20 cursor-pointer" onClick={() => setDetailId(r.employeeId)}>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Avatar initials={(r.name || "?").split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase()} size="sm" />
+                      <div><p className="font-semibold">{r.name}</p><p className="text-[11px] text-muted-foreground">{r.position || "—"} · {r.department || "—"}</p></div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5">{t ? <StatusBadge status={t.status} /> : <span className="text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">Not checked in</span>}</td>
+                  <td className="px-3 py-2.5 font-mono">{t?.checkIn ?? "—"}</td>
+                  <td className="px-3 py-2.5 font-mono">{lmToday > 0 ? <span className="text-orange-600 font-semibold">{lmToday} mnt</span> : "—"}</td>
+                  <td className="px-3 py-2.5 font-mono">{r.days_worked}</td>
+                  <td className="px-3 py-2.5 font-mono">{r.late_days > 0 ? <span className="text-amber-600 font-semibold">{r.late_days}</span> : "0"}</td>
+                  <td className="px-3 py-2.5 font-mono">{r.late_minutes > 0 ? <span className="text-orange-600 font-semibold">{r.late_minutes}</span> : "0"}</td>
+                  <td className="px-3 py-2.5 font-mono">{r.absent_days > 0 ? <span className="text-red-600 font-semibold">{r.absent_days}</span> : "0"}</td>
+                  <td className="px-3 py-2.5"><span className="text-primary text-xs font-semibold whitespace-nowrap">Details ›</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <Pagination page={mainPg.page} totalPages={mainPg.totalPages} total={mainPg.total} from={mainPg.from} to={mainPg.to} onPage={mainPg.setPage} />
+    </div>
+  );
+}
+
 function RiwayatTab({ token, employees }: { token: string; employees: ApiEmployee[] }) {
   const [empId, setEmpId] = useState("");
   const [start, setStart] = useState("");
@@ -1479,28 +1826,64 @@ function RiwayatTab({ token, employees }: { token: string; employees: ApiEmploye
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const load = async () => {
-    if (!empId) { setErr("Pilih karyawan"); return; }
+    if (!empId) { setErr("Select an employee"); return; }
     setBusy(true); setErr("");
     try { setRows(await api.employeeAttendance(token, empId, { start, end })); }
-    catch (e: any) { setErr(e?.message || "Gagal"); } finally { setBusy(false); }
+    catch (e: any) { setErr(e?.message || "Failed"); } finally { setBusy(false); }
   };
+  // Auto-pilih karyawan pertama SEKALI. Pakai id (string stabil), BUKAN array
+  // employees yang referensinya berubah tiap polling (cegah re-render loop).
+  const firstEmpId = employees[0]?.employeeId;
+  useEffect(() => {
+    if (!empId && firstEmpId) setEmpId(firstEmpId);
+  }, [firstEmpId, empId]);
+  // Muat riwayat saat karyawan dipilih. TIDAK bergantung pada polling employees,
+  // jadi tak re-fetch/flicker tiap interval. Filter tanggal dipakai via "Tampilkan".
+  useEffect(() => {
+    if (!empId) return;
+    let alive = true;
+    api.employeeAttendance(token, empId, { start, end }).then(r => { if (alive) setRows(r); }).catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empId, token]);
+  // Ringkasan per status (hadir/terlambat/izin/dll) dari baris yang dimuat.
+  const summary = rows.reduce((a, r) => { a.total++; a[r.status] = (a[r.status] || 0) + 1; return a; }, { total: 0 } as Record<string, number>);
+  const STAT_LABEL: Record<string, string> = { hadir: "Present", terlambat: "Late", izin: "Permission", cuti: "Leave", alpha: "Absent", absent: "Absent" };
+  const empName = employees.find(e => e.employeeId === empId)?.name || empId;
+  const exportCsv = () => {
+    if (!rows.length) return;
+    const csv = toCsv(["Date", "Check-in", "Check-out", "Status", "Method"],
+      rows.map(r => [r.date, r.check_in ?? "", r.check_out ?? "", STAT_LABEL[r.status] || r.status, r.method ?? ""]));
+    downloadText(`history-${empName}-${start || "awal"}_sd_${end || "akhir"}.csv`, csv);
+  };
+  const pg = usePagination(rows);
   const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
-    <div className="space-y-3 max-w-3xl">
+    <div className="space-y-3">
       {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
       <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Karyawan</label><select className={inputCls} value={empId} onChange={e => setEmpId(e.target.value)}><option value="">Pilih…</option>{employees.map(e => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}</select></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Dari</label><input type="date" className={inputCls} value={start} onChange={e => setStart(e.target.value)} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Sampai</label><input type="date" className={inputCls} value={end} onChange={e => setEnd(e.target.value)} /></div>
-        <button disabled={busy} onClick={load} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">{busy ? "Memuat…" : "Tampilkan"}</button>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Employee</label><select className={inputCls} value={empId} onChange={e => setEmpId(e.target.value)}><option value="">Select…</option>{employees.map(e => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}</select></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">From</label><input type="date" className={inputCls} value={start} onChange={e => setStart(e.target.value)} /></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">To</label><input type="date" className={inputCls} value={end} onChange={e => setEnd(e.target.value)} /></div>
+        <button disabled={busy} onClick={load} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">{busy ? "Loading…" : "Show"}</button>
+        <button disabled={!rows.length} onClick={exportCsv} title="Export CSV (Excel)" className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40 disabled:opacity-40"><Download className="w-4 h-4" />Export CSV</button>
       </div>
+      {rows.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <span className="px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs font-bold">Total: {summary.total} days</span>
+          {Object.keys(summary).filter(k => k !== "total").map(k => (
+            <span key={k} className="px-3 py-1.5 rounded-lg bg-card border border-border text-xs font-semibold">{STAT_LABEL[k] || k}: {summary[k]}</span>
+          ))}
+        </div>
+      )}
       <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Tanggal", "Masuk", "Keluar", "Status", "Metode"].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Date", "Check-in", "Check-out", "Status", "Method"].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
           <tbody className="divide-y divide-border">
-            {rows.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground text-sm">Pilih karyawan lalu "Tampilkan".</td></tr>}
-            {rows.map((r, i) => <tr key={i} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-mono">{r.date}</td><td className="px-4 py-2.5 font-mono">{r.check_in ?? "—"}</td><td className="px-4 py-2.5 font-mono">{r.check_out ?? "—"}</td><td className="px-4 py-2.5"><StatusBadge status={r.status as AttendanceRecord["status"]} /></td><td className="px-4 py-2.5 text-xs">{r.method ?? "—"}</td></tr>)}
+            {rows.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground text-sm">Select an employee then "Show".</td></tr>}
+            {pg.pageItems.map((r, i) => <tr key={i} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-mono">{r.date}</td><td className="px-4 py-2.5 font-mono">{r.check_in ?? "—"}</td><td className="px-4 py-2.5 font-mono">{r.check_out ?? "—"}</td><td className="px-4 py-2.5"><StatusBadge status={r.status as AttendanceRecord["status"]} /></td><td className="px-4 py-2.5 text-xs">{r.method ?? "—"}</td></tr>)}
           </tbody></table>
       </div>
+      <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} />
     </div>
   );
 }
@@ -1519,56 +1902,56 @@ function PengaturanTab({ token }: { token: string }) {
   }, [token]);
   const saveProfile = async () => {
     setBusy(true); setErr(""); setMsg("");
-    try { await api.updateCompany(token, { name: co.name, address: co.address, contact_email: co.contact_email, industry: co.industry, work_hours: co.work_hours }); if (co.logo_url) await api.setLogo(token, co.logo_url); setMsg("Profil tersimpan"); }
-    catch (e: any) { setErr(e?.message || "Gagal"); } finally { setBusy(false); }
+    try { await api.updateCompany(token, { name: co.name, address: co.address, contact_email: co.contact_email, industry: co.industry, work_hours: co.work_hours }); if (co.logo_url) await api.setLogo(token, co.logo_url); setMsg("Profile saved"); }
+    catch (e: any) { setErr(e?.message || "Failed"); } finally { setBusy(false); }
   };
   const saveSettings = async () => {
     setBusy(true); setErr(""); setMsg("");
-    try { await api.updateCompanySettings(token, settings); setMsg("Pengaturan tersimpan"); }
-    catch (e: any) { setErr(e?.message || "Gagal"); } finally { setBusy(false); }
+    try { await api.updateCompanySettings(token, settings); setMsg("Settings saved"); }
+    catch (e: any) { setErr(e?.message || "Failed"); } finally { setBusy(false); }
   };
   const addCompany = async () => {
     if (!newCo.trim()) return;
     setBusy(true); setErr(""); setMsg("");
-    try { await api.registerCompany(token, { company_name: newCo.trim() }); setNewCo(""); setMsg("Perusahaan/cabang ditambahkan"); }
-    catch (e: any) { setErr(e?.message || "Gagal"); } finally { setBusy(false); }
+    try { await api.registerCompany(token, { company_name: newCo.trim() }); setNewCo(""); setMsg("Company/branch added"); }
+    catch (e: any) { setErr(e?.message || "Failed"); } finally { setBusy(false); }
   };
   const inputCls = "w-full px-3 py-2 rounded-lg border border-border text-sm";
-  if (!co) return <p className="text-muted-foreground text-sm">{err || "Memuat…"}</p>;
+  if (!co) return <p className="text-muted-foreground text-sm">{err || "Loading…"}</p>;
   return (
-    <div className="space-y-4 max-w-xl">
+    <div className="space-y-4">
       {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
       {msg && <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5" />{msg}</div>}
       <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-        <p className="font-semibold text-sm">Profil Perusahaan</p>
+        <p className="font-semibold text-sm">Company Profile</p>
         <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Nama</label><input className={inputCls} value={co.name ?? ""} onChange={e => setCo({ ...co, name: e.target.value })} /></div>
-        <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Alamat</label><input className={inputCls} value={co.address ?? ""} onChange={e => setCo({ ...co, address: e.target.value })} /></div>
+        <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Address</label><input className={inputCls} value={co.address ?? ""} onChange={e => setCo({ ...co, address: e.target.value })} /></div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Jam Masuk</label><input type="time" className={inputCls} value={co.work_hours?.start ?? ""} onChange={e => setCo({ ...co, work_hours: { ...co.work_hours, start: e.target.value } })} /></div>
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Jam Keluar</label><input type="time" className={inputCls} value={co.work_hours?.end ?? ""} onChange={e => setCo({ ...co, work_hours: { ...co.work_hours, end: e.target.value } })} /></div>
+          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Clock-in</label><input type="time" className={inputCls} value={co.work_hours?.start ?? ""} onChange={e => setCo({ ...co, work_hours: { ...co.work_hours, start: e.target.value } })} /></div>
+          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Clock-out</label><input type="time" className={inputCls} value={co.work_hours?.end ?? ""} onChange={e => setCo({ ...co, work_hours: { ...co.work_hours, end: e.target.value } })} /></div>
         </div>
         <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Logo URL</label><input className={inputCls} placeholder="https://…" value={co.logo_url ?? ""} onChange={e => setCo({ ...co, logo_url: e.target.value })} /></div>
-        <button disabled={busy} onClick={saveProfile} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Simpan Profil</button>
+        <button disabled={busy} onClick={saveProfile} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Save Profile</button>
       </div>
       {settings && <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-        <p className="font-semibold text-sm">Pengaturan Aplikasi</p>
-        <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Mode Absensi</label>
-          <select className={inputCls} value={settings.attendance_mode} onChange={e => setSettings({ ...settings, attendance_mode: e.target.value })}><option value="qr_dynamic">QR Dinamis</option><option value="qr_static">QR Statis</option></select></div>
+        <p className="font-semibold text-sm">App Settings</p>
+        <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Attendance Mode</label>
+          <select className={inputCls} value={settings.attendance_mode} onChange={e => setSettings({ ...settings, attendance_mode: e.target.value })}><option value="qr_dynamic">Dynamic QR</option><option value="qr_static">Static QR</option></select></div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Zona Waktu</label><input className={inputCls} value={settings.timezone ?? ""} onChange={e => setSettings({ ...settings, timezone: e.target.value })} /></div>
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Bahasa</label><input className={inputCls} value={settings.language ?? ""} onChange={e => setSettings({ ...settings, language: e.target.value })} /></div>
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Mata Uang (gaji & payroll)</label>
+          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Time Zone</label><input className={inputCls} value={settings.timezone ?? ""} onChange={e => setSettings({ ...settings, timezone: e.target.value })} /></div>
+          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Language</label><input className={inputCls} value={settings.language ?? ""} onChange={e => setSettings({ ...settings, language: e.target.value })} /></div>
+          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Currency (salary & payroll)</label>
             <select className={inputCls} value={settings.base_currency ?? "IDR"} onChange={e => setSettings({ ...settings, base_currency: e.target.value })}>
               {["IDR", "USD", "EUR", "GBP", "SGD", "MYR", "JPY", "CNY", "AUD", "INR", "AED", "SAR"].map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <p className="text-[10px] text-muted-foreground mt-1">Mata uang operasional perusahaan. Semua nominal gaji/slip & label kurs mengikuti ini — bukan dipaku ke Rupiah.</p>
+            <p className="text-[10px] text-muted-foreground mt-1">The company's operating currency. All salary/payslip amounts & rate labels follow this — not pinned to Rupiah.</p>
           </div>
         </div>
-        <button disabled={busy} onClick={saveSettings} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Simpan Pengaturan</button>
+        <button disabled={busy} onClick={saveSettings} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Save Settings</button>
       </div>}
       <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-        <p className="font-semibold text-sm">Tambah Perusahaan / Cabang</p>
-        <div className="flex gap-2"><input className={inputCls} placeholder="Nama perusahaan/cabang baru" value={newCo} onChange={e => setNewCo(e.target.value)} /><button disabled={busy} onClick={addCompany} className="px-4 py-2 rounded-lg bg-foreground text-background text-sm font-semibold disabled:opacity-50 whitespace-nowrap">Tambah</button></div>
+        <p className="font-semibold text-sm">Add Company / Branch</p>
+        <div className="flex gap-2"><input className={inputCls} placeholder="New company/branch name" value={newCo} onChange={e => setNewCo(e.target.value)} /><button disabled={busy} onClick={addCompany} className="px-4 py-2 rounded-lg bg-foreground text-background text-sm font-semibold disabled:opacity-50 whitespace-nowrap">Add</button></div>
       </div>
     </div>
   );
@@ -1578,42 +1961,51 @@ function PengaturanTab({ token }: { token: string }) {
 function LogTab({ token }: { token: string }) {
   const { data, error: err } = usePolledData(() => api.logs(token));
   const rows = data ?? [];
+  const pg = usePagination(rows);
   return (
     <div className="space-y-3">
       {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
       <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Waktu", "Aksi", "Detail"].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Time", "Action", "Details"].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
           <tbody className="divide-y divide-border">
-            {rows.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-muted-foreground text-sm">Belum ada log.</td></tr>}
-            {rows.map(l => <tr key={l.id} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">{l.created_at}</td><td className="px-4 py-2.5 font-semibold text-xs">{l.action}</td><td className="px-4 py-2.5 text-xs text-muted-foreground">{l.detail ?? "—"}</td></tr>)}
+            {rows.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-muted-foreground text-sm">No logs yet.</td></tr>}
+            {pg.pageItems.map(l => <tr key={l.id} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">{l.created_at}</td><td className="px-4 py-2.5 font-semibold text-xs">{l.action}</td><td className="px-4 py-2.5 text-xs text-muted-foreground">{l.detail ?? "—"}</td></tr>)}
           </tbody></table>
       </div>
+      <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} />
     </div>
   );
 }
 
 // Modul Penggajian (admin) — komponen gaji + aturan otomatis + proses payroll +
 // slip (terintegrasi absensi via /api/payroll*).
-const BASIS_LABEL: Record<string, string> = { fixed: "Tetap", percent_base: "% gaji pokok", per_late_min: "per menit telat", per_absent_day: "per hari alpa", per_overtime_hour: "per jam lembur" };
-const METRIC_LABEL: Record<string, string> = { late_days: "Hari telat", late_minutes: "Menit telat", overtime_hours: "Jam lembur", absent_days: "Hari alpa", leave_days: "Hari cuti" };
+const BASIS_LABEL: Record<string, string> = { fixed: "Fixed", percent_base: "% of base salary", per_late_min: "per late minute", per_absent_day: "per absent day", per_overtime_hour: "per overtime hour" };
+const METRIC_LABEL: Record<string, string> = { late_days: "Late days", late_minutes: "Late minutes", overtime_hours: "Overtime hours", absent_days: "Absent days", leave_days: "Leave days", days_worked: "Days worked" };
+const METRIC_UNIT: Record<string, string> = { late_days: "hari", late_minutes: "menit", overtime_hours: "jam", absent_days: "hari", leave_days: "hari", days_worked: "hari" };
+// Nilai metrik + satuan; menit telat juga ditampilkan dalam jam-menit ("235 menit · 3j 55m").
+function fmtMetricVal(k: string, v: any): string {
+  const u = METRIC_UNIT[k];
+  if (k === "late_minutes" && Number(v) >= 60) return `${v} menit · ${Math.floor(v / 60)}j ${v % 60}m`;
+  return u ? `${v} ${u}` : String(v);
+}
 // Format uang dinamis sesuai kode mata uang ISO 4217 (multi-currency — TIDAK
-// dipaku ke IDR). Locale id-ID hanya untuk pemisah ribuan; simbol & penempatan
+// dipaku ke IDR). Locale en-US hanya untuk pemisah ribuan; simbol & penempatan
 // otomatis dari Intl. Fallback bila kode mata uang tak dikenal.
 const ZERO_DECIMAL_CUR = ["IDR", "JPY", "KRW", "VND"];
 function fmtMoney(n: number, currency = "IDR") {
   const v = Number.isFinite(n) ? n : 0;
   try {
-    return new Intl.NumberFormat("id-ID", {
+    return new Intl.NumberFormat("en-US", {
       style: "currency", currency,
       maximumFractionDigits: ZERO_DECIMAL_CUR.includes(currency) ? 0 : 2,
     }).format(v);
-  } catch { return `${currency} ${v.toLocaleString("id-ID")}`; }
+  } catch { return `${currency} ${v.toLocaleString("en-US")}`; }
 }
 
 function PayrollTab({ token }: { token: string }) {
   const [slips, setSlips] = useState<Payslip[] | null>(null);
   const [detail, setDetail] = useState<Payslip | null>(null);
-  const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
+  const [period, setPeriod] = useState(() => localYM());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
@@ -1647,35 +2039,64 @@ function PayrollTab({ token }: { token: string }) {
     return fmtMoney(amount / latestRate[currency], currency);
   };
 
-  const addComp = async () => { if (!cForm.name.trim()) { setErr("Nama komponen wajib"); return; } setBusy(true); setErr(""); try { await api.createSalaryComponent(token, { ...cForm, value: Number(cForm.value) || 0 }); setCForm({ name: "", type: "earning", basis: "fixed", value: 0 }); reload(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
-  const addRule = async () => { if (!rForm.name.trim()) { setErr("Nama aturan wajib"); return; } setBusy(true); setErr(""); try { await api.createPayrollRule(token, { ...rForm, threshold: Number(rForm.threshold) || 0, amount: Number(rForm.amount) || 0 }); setRForm({ name: "", metric: "late_days", op: "gte", threshold: 0, action: "deduction", amount: 0 }); reload(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const addComp = async () => { const v = salaryComponentSchema.safeParse(cForm); if (!v.success) { setErr(Object.values(zodErrors(v.error))[0] || "Invalid input"); return; } setBusy(true); setErr(""); try { await api.createSalaryComponent(token, { ...cForm, value: Number(cForm.value) || 0 }); setCForm({ name: "", type: "earning", basis: "fixed", value: 0 }); reload(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const addRule = async () => { const v = payrollRuleSchema.safeParse(rForm); if (!v.success) { setErr(Object.values(zodErrors(v.error))[0] || "Invalid input"); return; } setBusy(true); setErr(""); try { await api.createPayrollRule(token, { ...rForm, threshold: Number(rForm.threshold) || 0, amount: Number(rForm.amount) || 0 }); setRForm({ name: "", metric: "late_days", op: "gte", threshold: 0, action: "deduction", amount: 0 }); reload(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   const viewSlips = async (runId: string) => { setBusy(true); setErr(""); try { setSlips(await api.runPayslips(token, runId)); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
-  const runNow = async () => { setBusy(true); setErr(""); setMsg(""); try { const r = await api.runPayroll(token, period); setMsg(`Payroll ${r.period}: ${r.count} slip · total ${fmtMoney(r.totalNet, baseCur)}`); reload(); await viewSlips(r.runId); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const runNow = async () => { setConfirmRun(false); setBusy(true); setErr(""); setMsg(""); try { const r = await api.runPayroll(token, period); setMsg(`Payroll ${r.period}: ${r.count} slips · total ${fmtMoney(r.totalNet, baseCur)}`); reload(); await viewSlips(r.runId); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const [confirmRun, setConfirmRun] = useState(false);
+  // Rekap CSV dari slip yang sedang ditampilkan (nilai dalam base_currency).
+  const exportSlipsCsv = () => {
+    if (!slips?.length) return;
+    const csv = toCsv(["Employee", "Period", "Base Salary", "Allowance", "Deduction", "Net Pay"],
+      slips.map(s => [s.name, s.period, s.base_salary, s.earnings, s.deductions, s.net]));
+    downloadText(`rekap-gaji-${slips[0]?.period || period}.csv`, csv);
+  };
+  // Agregat rekap untuk slip yang ditampilkan.
+  const slipAgg = (slips || []).reduce((a, s) => { a.base += s.base_salary; a.earn += s.earnings; a.ded += s.deductions; a.net += s.net; return a; }, { base: 0, earn: 0, ded: 0, net: 0 });
+  const slipPg = usePagination(slips || []);
+  const runPg = usePagination(runs);
+  // Cetak slip → jendela baru ber-styling → dialog print/PDF browser.
+  const printSlip = (s: Payslip) => {
+    const lines = (s.detail?.lines || []).map((l: any) =>
+      `<tr><td>${l.name}${l.note ? `<div class="muted">${l.note}</div>` : ""}</td><td class="r" style="color:${l.type === "earning" ? "#0a7d4a" : "#c0392b"}">${l.type === "earning" ? "+" : "−"}${fmtMoney(l.amount, baseCur)}</td></tr>`).join("");
+    const metrics = s.detail ? Object.entries(s.detail.metrics).map(([k, v]) => `<tr><td>${METRIC_LABEL[k] || k}</td><td class="r">${fmtMetricVal(k, v)}</td></tr>`).join("") : "";
+    const w = window.open("", "_blank", "width=520,height=720");
+    if (!w) { setErr("Browser blocked the popup — allow popups to print the slip."); return; }
+    w.document.write(`<!doctype html><html lang="id"><head><meta charset="utf-8"><title>Payslip ${s.name} ${s.period}</title>
+<style>body{font-family:system-ui,Arial,sans-serif;color:#1B3D72;margin:32px;font-size:13px}h1{font-size:18px;margin:0}.sub{color:#667;font-size:12px;margin:2px 0 16px}table{width:100%;border-collapse:collapse;margin:8px 0}td{padding:5px 0;border-bottom:1px solid #eee}.r{text-align:right;font-variant-numeric:tabular-nums}.tot{font-weight:700;border-top:2px solid #1B3D72;font-size:15px}.sec{font-weight:700;margin-top:14px;color:#0D1B2A}.muted{color:#889;font-size:11px}@media print{body{margin:12mm}}</style></head>
+<body><h1>Payslip</h1><div class="sub">${s.name} · Period ${s.period} · Currency ${baseCur}</div>
+${metrics ? `<div class="sec">Attendance Metrics</div><table>${metrics}</table>` : ""}
+<div class="sec">Breakdown</div><table><tr><td>Base Salary</td><td class="r">${fmtMoney(s.base_salary, baseCur)}</td></tr>${lines}
+<tr class="tot"><td>Net Pay</td><td class="r">${fmtMoney(s.net, baseCur)}</td></tr></table>
+<p class="muted">Printed from Zylora Attendance & HRIS — valid without a wet signature.</p>
+<script>window.onload=function(){window.print()}</script></body></html>`);
+    w.document.close();
+  };
 
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-4">
       {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
       {msg && <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5" />{msg}</div>}
 
       {/* Proses payroll */}
       <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-3">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Periode</label><input type="month" className={inputCls} value={period} onChange={e => setPeriod(e.target.value)} /></div>
-        <button disabled={busy} onClick={runNow} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"><Download className="w-4 h-4" />{busy ? "Memproses…" : "Proses Payroll"}</button>
-        <p className="text-xs text-muted-foreground">Tarik otomatis dari absensi (telat, lembur, alpa, cuti) + komponen & aturan di bawah.</p>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Period</label><input type="month" className={inputCls} value={period} onChange={e => setPeriod(e.target.value)} /></div>
+        <button disabled={busy} onClick={() => setConfirmRun(true)} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"><Download className="w-4 h-4" />{busy ? "Processing…" : "Run Payroll"}</button>
+        <p className="text-xs text-muted-foreground">Auto-pulled from attendance (late, overtime, absent, leave) + components & rules below.</p>
       </div>
 
       {/* Komponen gaji */}
       <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-        <p className="font-semibold text-sm">Komponen Gaji (tunjangan / potongan)</p>
+        <p className="font-semibold text-sm">Salary Components (allowances / deductions)</p>
         <div className="flex flex-wrap items-end gap-2">
-          <input className={inputCls} placeholder="Nama (mis. Transport)" value={cForm.name} onChange={e => setCForm(f => ({ ...f, name: e.target.value }))} />
-          <select className={inputCls} value={cForm.type} onChange={e => setCForm(f => ({ ...f, type: e.target.value }))}><option value="earning">Tunjangan (+)</option><option value="deduction">Potongan (−)</option></select>
+          <input className={inputCls} placeholder="Name (e.g. Transport)" value={cForm.name} onChange={e => setCForm(f => ({ ...f, name: e.target.value }))} />
+          <select className={inputCls} value={cForm.type} onChange={e => setCForm(f => ({ ...f, type: e.target.value }))}><option value="earning">Allowance (+)</option><option value="deduction">Deduction (−)</option></select>
           <select className={inputCls} value={cForm.basis} onChange={e => setCForm(f => ({ ...f, basis: e.target.value }))}>{Object.entries(BASIS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-          <input type="number" className={inputCls + " w-32"} placeholder="Nilai" value={cForm.value} onChange={e => setCForm(f => ({ ...f, value: Number(e.target.value) }))} />
-          <button disabled={busy} onClick={addComp} className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">Tambah</button>
+          <input type="number" className={inputCls + " w-32"} placeholder="Value" value={cForm.value} onChange={e => setCForm(f => ({ ...f, value: Number(e.target.value) }))} />
+          <button disabled={busy} onClick={addComp} className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">Add</button>
         </div>
         <div className="flex flex-wrap gap-2">
-          {comps.length === 0 && <p className="text-xs text-muted-foreground">Belum ada komponen.</p>}
+          {comps.length === 0 && <p className="text-xs text-muted-foreground">No components yet.</p>}
           {comps.map(c => (
             <span key={c.id} className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${c.type === "earning" ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-red-50 border-red-200 text-red-700"}`}>
               {c.name}: {c.basis === "fixed" || c.basis === "percent_base" ? c.value : c.value} <span className="opacity-60">({BASIS_LABEL[c.basis]})</span>
@@ -1687,21 +2108,21 @@ function PayrollTab({ token }: { token: string }) {
 
       {/* Aturan otomatis */}
       <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-        <p className="font-semibold text-sm">Aturan Otomatis (pemicu kondisi)</p>
+        <p className="font-semibold text-sm">Automatic Rules (conditional triggers)</p>
         <div className="flex flex-wrap items-end gap-2">
-          <input className={inputCls} placeholder="Nama aturan" value={rForm.name} onChange={e => setRForm(f => ({ ...f, name: e.target.value }))} />
+          <input className={inputCls} placeholder="Rule name" value={rForm.name} onChange={e => setRForm(f => ({ ...f, name: e.target.value }))} />
           <select className={inputCls} value={rForm.metric} onChange={e => setRForm(f => ({ ...f, metric: e.target.value }))}>{Object.entries(METRIC_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
           <select className={inputCls} value={rForm.op} onChange={e => setRForm(f => ({ ...f, op: e.target.value }))}><option value="gte">≥</option><option value="gt">&gt;</option></select>
-          <input type="number" className={inputCls + " w-24"} placeholder="Ambang" value={rForm.threshold} onChange={e => setRForm(f => ({ ...f, threshold: Number(e.target.value) }))} />
-          <select className={inputCls} value={rForm.action} onChange={e => setRForm(f => ({ ...f, action: e.target.value }))}><option value="deduction">Potongan</option><option value="bonus">Bonus</option></select>
-          <input type="number" className={inputCls + " w-32"} placeholder={`Jumlah (${baseCur})`} value={rForm.amount} onChange={e => setRForm(f => ({ ...f, amount: Number(e.target.value) }))} />
-          <button disabled={busy} onClick={addRule} className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">Tambah</button>
+          <input type="number" className={inputCls + " w-24"} placeholder="Threshold" value={rForm.threshold} onChange={e => setRForm(f => ({ ...f, threshold: Number(e.target.value) }))} />
+          <select className={inputCls} value={rForm.action} onChange={e => setRForm(f => ({ ...f, action: e.target.value }))}><option value="deduction">Deduction</option><option value="bonus">Bonus</option></select>
+          <input type="number" className={inputCls + " w-32"} placeholder={`Amount (${baseCur})`} value={rForm.amount} onChange={e => setRForm(f => ({ ...f, amount: Number(e.target.value) }))} />
+          <button disabled={busy} onClick={addRule} className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">Add</button>
         </div>
         <div className="space-y-1">
-          {rules.length === 0 && <p className="text-xs text-muted-foreground">Belum ada aturan.</p>}
+          {rules.length === 0 && <p className="text-xs text-muted-foreground">No rules yet.</p>}
           {rules.map(r => (
             <div key={r.id} className="flex items-center justify-between text-xs bg-muted/30 rounded-lg px-3 py-1.5">
-              <span><b>{r.name}</b> — jika {METRIC_LABEL[r.metric]} {r.op === "gt" ? ">" : "≥"} {r.threshold} → {r.action === "bonus" ? "bonus" : "potongan"} {fmtMoney(r.amount, baseCur)}</span>
+              <span><b>{r.name}</b> — if {METRIC_LABEL[r.metric]} {r.op === "gt" ? ">" : "≥"} {r.threshold} → {r.action === "bonus" ? "bonus" : "deduction"} {fmtMoney(r.amount, baseCur)}</span>
               <button onClick={() => api.deletePayrollRule(token, r.id).then(reload)} className="text-muted-foreground hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
             </div>
           ))}
@@ -1712,79 +2133,115 @@ function PayrollTab({ token }: { token: string }) {
       {slips && (
         <div className="bg-card rounded-xl border border-border overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between">
-            <span className="text-sm font-semibold">Slip Gaji ({slips.length})</span>
-            <label className="text-xs flex items-center gap-1.5 text-muted-foreground">Tampilkan dalam:
-              <select className="px-2 py-1 rounded-lg border border-border text-xs" value={currency} onChange={e => setCurrency(e.target.value)}>
-                <option value={baseCur}>{baseCur}</option>
-                {Object.keys(latestRate).filter(c => c !== baseCur).map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </label>
+            <span className="text-sm font-semibold">Payslips ({slips.length})</span>
+            <div className="flex items-center gap-3">
+              <button onClick={exportSlipsCsv} className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"><Download className="w-3.5 h-3.5" />Ekspor Rekap CSV</button>
+              <label className="text-xs flex items-center gap-1.5 text-muted-foreground">Show in:
+                <select className="px-2 py-1 rounded-lg border border-border text-xs" value={currency} onChange={e => setCurrency(e.target.value)}>
+                  <option value={baseCur}>{baseCur}</option>
+                  {Object.keys(latestRate).filter(c => c !== baseCur).map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            </div>
           </div>
-          {currency !== baseCur && latestRate[currency] && <p className="px-4 pt-2 text-[11px] text-muted-foreground">Konversi kurs: 1 {currency} = {fmtMoney(latestRate[currency], baseCur)} (transparan, dari Manajemen Kurs).</p>}
+          {currency !== baseCur && latestRate[currency] && <p className="px-4 pt-2 text-[11px] text-muted-foreground">Exchange rate: 1 {currency} = {fmtMoney(latestRate[currency], baseCur)} (transparent, from Exchange Rates).</p>}
           <table className="w-full text-sm">
-            <thead><tr className="border-b border-border bg-muted/20">{["Karyawan", "Pokok", "Tunjangan", "Potongan", "Net", ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+            <thead><tr className="border-b border-border bg-muted/20">{["Employee", "Base", "Allowance", "Deduction", "Net", ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-border">
-              {slips.map(s => (
+              {slipPg.pageItems.map(s => (
                 <tr key={s.id} className="hover:bg-muted/20">
                   <td className="px-4 py-2 font-semibold">{s.name}</td>
                   <td className="px-4 py-2 font-mono">{fmt(s.base_salary)}</td>
                   <td className="px-4 py-2 font-mono text-emerald-600">+{fmt(s.earnings)}</td>
                   <td className="px-4 py-2 font-mono text-red-600">−{fmt(s.deductions)}</td>
                   <td className="px-4 py-2 font-mono font-bold">{fmt(s.net)}</td>
-                  <td className="px-4 py-2"><button onClick={() => setDetail(s)} className="text-primary text-xs hover:underline">Rincian</button></td>
+                  <td className="px-4 py-2"><button onClick={() => setDetail(s)} className="text-primary text-xs hover:underline">Details</button></td>
                 </tr>
               ))}
             </tbody>
+            {slips.length > 0 && (
+              <tfoot><tr className="border-t-2 border-border bg-muted/20 font-bold">
+                <td className="px-4 py-2">Total ({slips.length} slips)</td>
+                <td className="px-4 py-2 font-mono">{fmt(slipAgg.base)}</td>
+                <td className="px-4 py-2 font-mono text-emerald-600">+{fmt(slipAgg.earn)}</td>
+                <td className="px-4 py-2 font-mono text-red-600">−{fmt(slipAgg.ded)}</td>
+                <td className="px-4 py-2 font-mono">{fmt(slipAgg.net)}</td>
+                <td></td>
+              </tr></tfoot>
+            )}
           </table>
+          <div className="px-4 pb-3"><Pagination page={slipPg.page} totalPages={slipPg.totalPages} total={slipPg.total} from={slipPg.from} to={slipPg.to} onPage={slipPg.setPage} /></div>
         </div>
       )}
 
       {/* Riwayat run */}
       <div className="bg-card rounded-xl border border-border p-4 space-y-2">
-        <p className="font-semibold text-sm">Riwayat Proses Payroll</p>
-        {runs.length === 0 && <p className="text-xs text-muted-foreground">Belum ada proses payroll.</p>}
-        {runs.map(r => (
+        <p className="font-semibold text-sm">Payroll Run History</p>
+        {runs.length === 0 && <p className="text-xs text-muted-foreground">No payroll runs yet.</p>}
+        {runPg.pageItems.map(r => (
           <div key={r.runId} className="flex items-center justify-between text-xs bg-muted/30 rounded-lg px-3 py-1.5">
-            <span>Periode <b>{r.period}</b> · {r.count} slip · total {fmtMoney(r.totalNet, baseCur)}</span>
-            <button onClick={() => viewSlips(r.runId)} className="text-primary font-semibold hover:underline">Lihat slip</button>
+            <span>Period <b>{r.period}</b> · {r.count} slips · total {fmtMoney(r.totalNet, baseCur)}</span>
+            <button onClick={() => viewSlips(r.runId)} className="text-primary font-semibold hover:underline">View slips</button>
           </div>
         ))}
+        <Pagination page={runPg.page} totalPages={runPg.totalPages} total={runPg.total} from={runPg.from} to={runPg.to} onPage={runPg.setPage} />
       </div>
 
       {/* Detail slip (modal sederhana) */}
       {detail && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setDetail(null)}>
           <div className="bg-card rounded-xl border border-border p-5 w-full max-w-md max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3"><p className="font-bold text-sm">Slip {detail.name} · {detail.period}</p><button onClick={() => setDetail(null)}><X className="w-4 h-4" /></button></div>
+            <div className="flex items-center justify-between mb-3"><p className="font-bold text-sm">Slip {detail.name} · {detail.period}</p><div className="flex items-center gap-3"><button onClick={() => printSlip(detail)} className="flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><Download className="w-3.5 h-3.5" />Print / PDF</button><button onClick={() => setDetail(null)}><X className="w-4 h-4" /></button></div></div>
             <div className="text-xs space-y-1 mb-3 text-muted-foreground">
-              {detail.detail && Object.entries(detail.detail.metrics).map(([k, v]) => <div key={k} className="flex justify-between"><span>{METRIC_LABEL[k] || k}</span><span className="font-mono">{v}</span></div>)}
+              {detail.detail && Object.entries(detail.detail.metrics).map(([k, v]) => <div key={k} className="flex justify-between"><span>{METRIC_LABEL[k] || k}</span><span className="font-mono">{fmtMetricVal(k, v)}</span></div>)}
             </div>
             <div className="border-t border-border pt-2 space-y-1 text-sm">
-              <div className="flex justify-between"><span>Gaji Pokok</span><span className="font-mono">{fmt(detail.base_salary)}</span></div>
-              {detail.detail?.lines.map((l, i) => <div key={i} className={`flex justify-between ${l.type === "earning" ? "text-emerald-600" : "text-red-600"}`}><span>{l.name}</span><span className="font-mono">{l.type === "earning" ? "+" : "−"}{fmt(l.amount)}</span></div>)}
-              <div className="flex justify-between font-bold border-t border-border pt-1.5 mt-1.5"><span>Gaji Bersih</span><span className="font-mono">{fmt(detail.net)}</span></div>
+              <div className="flex justify-between"><span>Base Salary</span><span className="font-mono">{fmt(detail.base_salary)}</span></div>
+              {detail.detail?.lines.map((l: any, i: number) => <div key={i} className={`flex justify-between gap-2 ${l.type === "earning" ? "text-emerald-600" : "text-red-600"}`}><span>{l.name}{l.note ? <span className="text-muted-foreground text-[11px] ml-1">· {l.note}</span> : ""}</span><span className="font-mono whitespace-nowrap">{l.type === "earning" ? "+" : "−"}{fmt(l.amount)}</span></div>)}
+              <div className="flex justify-between font-bold border-t border-border pt-1.5 mt-1.5"><span>Net Pay</span><span className="font-mono">{fmt(detail.net)}</span></div>
               {currency !== baseCur && latestRate[currency] && <p className="text-[10px] text-muted-foreground pt-1">Kurs 1 {currency} = {fmtMoney(latestRate[currency], baseCur)}</p>}
             </div>
           </div>
         </div>
       )}
+
+      {/* Preview / konfirmasi sebelum proses payroll (run bersifat permanen). */}
+      <AlertDialog open={confirmRun} onOpenChange={setConfirmRun}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Payroll Run</AlertDialogTitle>
+            <AlertDialogDescription>Review first. Slips are computed automatically from this period's attendance + active components & rules.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="text-sm space-y-1.5">
+            <div className="flex justify-between"><span className="text-muted-foreground">Period</span><b className="font-mono">{period}</b></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Salary components</span><b>{comps.length}</b></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Automatic rules</span><b>{rules.length}</b></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Base currency</span><b>{baseCur}</b></div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={busy} onClick={runNow}>{busy ? "Processing…" : "Confirm & Run"}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
 // Modul Manajemen Kurs (admin) — nilai tukar harian untuk konversi slip gaji.
 function KursTab({ token }: { token: string }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localYMD();
   const [form, setForm] = useState({ currency: "", rate: 0, date: today });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const dirty = form.currency.trim() !== "" || Number(form.rate) > 0;
   const { data: ratesData, error: loadErr, reload } = usePolledData(() => api.exchangeRates(token), { paused: dirty });
   const rates = ratesData ?? [];
+  const pg = usePagination(rates);
   const { data: baseCurData } = usePolledData(() => api.companySettings(token).then(s => s.base_currency || "IDR"));
   const baseCur = baseCurData ?? "IDR"; // mata uang dasar perusahaan
   const add = async () => {
-    if (!form.currency.trim() || !(Number(form.rate) > 0)) { setErr("Kode mata uang & kurs (>0) wajib"); return; }
+    const v = exchangeRateSchema.safeParse(form); if (!v.success) { setErr(Object.values(zodErrors(v.error))[0] || "Invalid input"); return; }
     setBusy(true); setErr("");
     try { await api.createExchangeRate(token, { currency: form.currency.toUpperCase(), rate: Number(form.rate), date: form.date }); setForm({ currency: "", rate: 0, date: today }); reload(); }
     catch (e: any) { setErr(e.message); } finally { setBusy(false); }
@@ -1793,34 +2250,35 @@ function KursTab({ token }: { token: string }) {
   for (const r of rates) if (!latest[r.currency]) latest[r.currency] = r;
   const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
-    <div className="space-y-3 max-w-3xl">
+    <div className="space-y-3">
       {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
       <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Mata Uang</label><input className={inputCls + " w-28 uppercase"} placeholder="USD" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} /></div>
+        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Currency</label><input className={inputCls + " w-28 uppercase"} placeholder="USD" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} /></div>
         <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Kurs (1 unit = {baseCur})</label><input type="number" className={inputCls + " w-40"} placeholder="16000" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: Number(e.target.value) }))} /></div>
         <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Tanggal</label><input type="date" className={inputCls} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
-        <button disabled={busy} onClick={add} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">Simpan Kurs</button>
+        <button disabled={busy} onClick={add} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">Save Rate</button>
       </div>
-      <p className="text-xs text-muted-foreground">Masukkan kurs resmi (mis. kurs tengah / mid-market). Konversi slip gaji memakai kurs terbaru per mata uang, relatif terhadap mata uang dasar perusahaan. <b>1 {form.currency || "USD"} = {form.rate ? fmtMoney(Number(form.rate), baseCur) : `… ${baseCur}`}</b></p>
+      <p className="text-xs text-muted-foreground">Enter the official rate (e.g. mid-market). Payslip conversion uses the latest rate per currency, relative to the company base currency. <b>1 {form.currency || "USD"} = {form.rate ? fmtMoney(Number(form.rate), baseCur) : `… ${baseCur}`}</b></p>
 
       <div className="flex flex-wrap gap-2">
         {Object.values(latest).map(r => (
           <span key={r.currency} className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-semibold">1 {r.currency} = {fmtMoney(r.rate, baseCur)} <span className="opacity-60 font-normal">({r.date})</span></span>
         ))}
-        {rates.length === 0 && <p className="text-xs text-muted-foreground">Belum ada kurs.</p>}
+        {rates.length === 0 && <p className="text-xs text-muted-foreground">No rates yet.</p>}
       </div>
 
       {rates.length > 0 && (
         <div className="bg-card rounded-xl border border-border overflow-hidden">
-          <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Tanggal", "Mata Uang", `Kurs (${baseCur})`, ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+          <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Date", "Currency", `Rate (${baseCur})`, ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-border">
-              {rates.map(r => (
+              {pg.pageItems.map(r => (
                 <tr key={r.id} className="hover:bg-muted/20">
                   <td className="px-4 py-2 font-mono">{r.date}</td><td className="px-4 py-2 font-semibold">{r.currency}</td><td className="px-4 py-2 font-mono">{fmtMoney(r.rate, baseCur)}</td>
                   <td className="px-4 py-2"><button onClick={() => api.deleteExchangeRate(token, r.id).then(reload)} className="text-muted-foreground hover:text-red-600"><X className="w-3.5 h-3.5" /></button></td>
                 </tr>
               ))}
             </tbody></table>
+          <div className="px-4 pb-3"><Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} /></div>
         </div>
       )}
     </div>
@@ -1873,6 +2331,11 @@ function useBackendData(enabled = true) {
   const [locations, setLocations] = useState<ApiLocation[]>([]);
   const [connected, setConnected] = useState(false);
   const [authed, setAuthed] = useState(false);
+  // restoring = sedang memvalidasi token tersimpan saat reload → tampilkan skeleton,
+  // BUKAN layar login (cegah "kedip ke login" tiap refresh).
+  const [restoring, setRestoring] = useState(() => {
+    try { return enabled && !!localStorage.getItem("zylora.control.token"); } catch { return false; }
+  });
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef<string | null>(null);
@@ -1885,7 +2348,7 @@ function useBackendData(enabled = true) {
     const t = tokenRef.current;
     if (!t) return;
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localYMD();
       const [board, leaves, emps, locs] = await Promise.all([api.attendance(t), api.leaves(t), api.employees(t), api.locations(t)]);
       setEmployees(emps);
       setLocations(locs);
@@ -1936,6 +2399,7 @@ function useBackendData(enabled = true) {
     tokenRef.current = r.token;
     setToken(r.token);
     setAuthed(true);
+    toast.success("Signed in to Control System");
     setError(null);
     try {
       if (remember) { localStorage.setItem("zylora.control.token", r.token); localStorage.setItem("zylora.control.email", email.trim()); }
@@ -1961,11 +2425,12 @@ function useBackendData(enabled = true) {
     if (!enabled) return;
     let saved: string | null = null;
     try { saved = localStorage.getItem("zylora.control.token"); } catch { /* abaikan */ }
-    if (!saved) return;
+    if (!saved) { setRestoring(false); return; }
     tokenRef.current = saved;
     api.company(saved)
       .then(() => { setToken(saved); setAuthed(true); refresh(); })
-      .catch(() => { tokenRef.current = null; try { localStorage.removeItem("zylora.control.token"); } catch { /* abaikan */ } });
+      .catch(() => { tokenRef.current = null; try { localStorage.removeItem("zylora.control.token"); } catch { /* abaikan */ } })
+      .finally(() => setRestoring(false));
   }, [enabled, refresh]);
 
   // Polling hanya setelah login.
@@ -1976,12 +2441,12 @@ function useBackendData(enabled = true) {
   }, [enabled, authed, refresh]);
 
   const approveLeave = useCallback(async (id: string) => {
-    try { await api.approveLeave(tokenRef.current!, id, true); } catch (e: any) { setError(e?.message ?? String(e)); }
+    try { await api.approveLeave(tokenRef.current!, id, true); toast.success("Leave approved"); } catch (e: any) { setError(e?.message ?? String(e)); toast.error(e?.message || "Failed to approve"); }
     await refresh();
   }, [refresh]);
 
   const rejectLeave = useCallback(async (id: string) => {
-    try { await api.approveLeave(tokenRef.current!, id, false); } catch (e: any) { setError(e?.message ?? String(e)); }
+    try { await api.approveLeave(tokenRef.current!, id, false); toast("Leave rejected"); } catch (e: any) { setError(e?.message ?? String(e)); toast.error(e?.message || "Failed to reject"); }
     await refresh();
   }, [refresh]);
 
@@ -1995,6 +2460,7 @@ function useBackendData(enabled = true) {
   const deleteEmployee = useCallback(async (id: string, soft = false) => {
     await api.deleteEmployee(tokenRef.current!, id, soft);
     codeCache.current = {}; await refresh();
+    toast.success(soft ? "Employee deactivated" : "Employee deleted");
   }, [refresh]);
   const resetEmployeeCode = useCallback(async (id: string) => {
     await api.resetEmployeeCode(tokenRef.current!, id);
@@ -2011,7 +2477,7 @@ function useBackendData(enabled = true) {
 
   return {
     attendance, leaveRequests, employees, locations, connected, error,
-    authed, token, login, logout,
+    authed, restoring, token, login, logout,
     approveLeave, rejectLeave,
     createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode,
     createLocation, createLocationQr,
@@ -2030,44 +2496,68 @@ function QRDisplayPage() {
   const online = useOnline();
   const [loc, setLoc] = useState<ApiPublicLocation | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [fs, setFs] = useState(false);
+  const REFRESH_S = 4;
+  const [tick, setTick] = useState(REFRESH_S);
 
   const load = useCallback(async () => {
     try { setLoc(await api.publicLocation()); setErr(null); }
-    catch (e: any) { setErr(e?.message || "Gagal memuat QR"); }
+    catch (e: any) { setErr(e?.message || "Failed to load QR"); }
+    finally { setTick(REFRESH_S); }
   }, []);
 
   useEffect(() => {
     load();
     // Polling cepat: token sekali-pakai, seri naik tiap scan → QR harus segera
     // diperbarui di layar setelah ada yang memindai.
-    const id = setInterval(load, 4000);
+    const id = setInterval(load, REFRESH_S * 1000);
     return () => clearInterval(id);
   }, [load]);
+
+  // Countdown detik menuju refresh QR berikutnya (indikator "hidup" di kiosk).
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => (t > 0 ? t - 1 : 0)), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Mode layar penuh untuk kiosk pintu masuk.
+  useEffect(() => {
+    const onFs = () => setFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+  const toggleFs = () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  };
 
   return (
     <div className="h-screen w-screen bg-[#0D1B2A] text-white flex flex-col items-center justify-center p-8 relative" style={{ fontFamily: "var(--font-sans)" }}>
       <div className="absolute top-6 left-8 flex items-center gap-2 text-white/60 text-sm">
         <Activity className="w-4 h-4 text-accent" />Zylora Absensi
-        {!online && <span className="flex items-center gap-1 text-red-400 ml-2"><WifiOff className="w-4 h-4" />Tidak ada internet</span>}
+        {!online && <span className="flex items-center gap-1 text-red-400 ml-2"><WifiOff className="w-4 h-4" />No internet</span>}
       </div>
-      <div className="absolute top-6 right-8 font-mono text-2xl font-bold tabular-nums">{fmtTime(now)}</div>
+      <div className="absolute top-6 right-8 flex items-center gap-4">
+        <div className="font-mono text-4xl font-bold tabular-nums">{fmtTime(now)}</div>
+        <button onClick={toggleFs} title={fs ? "Exit fullscreen" : "Fullscreen (kiosk)"} className="p-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors">{fs ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}</button>
+      </div>
 
-      <p className="text-white/60 text-sm uppercase tracking-widest mb-1">{loc?.name ?? "Lokasi Absensi"}</p>
-      <h1 className="text-2xl font-bold mb-6">Pindai untuk Absen</h1>
+      <p className="text-white/60 text-sm uppercase tracking-widest mb-1">{loc?.name ?? "Attendance Location"}</p>
+      <h1 className="text-2xl font-bold mb-6">Scan to Check In</h1>
 
       <div className="bg-white rounded-3xl p-6 shadow-2xl">
         {loc?.qrImageUrl ? (
-          <img src={loc.qrImageUrl} alt="QR Absensi" width={320} height={320} className="block rounded-xl" />
+          <img src={loc.qrImageUrl} alt="Attendance QR" width={320} height={320} className="block rounded-xl" />
         ) : (
           <div className="w-[320px] h-[320px] flex items-center justify-center text-[#0D1B2A]/40 text-sm">
-            {err ? "QR tidak tersedia" : "Memuat QR…"}
+            {err ? "QR unavailable" : "Loading QR…"}
           </div>
         )}
       </div>
 
       {loc?.type === "qr_dynamic" && loc.serial != null && (
         <div className="mt-4 text-center">
-          <p className="text-white/50 text-xs uppercase tracking-widest">Nomor Seri</p>
+          <p className="text-white/50 text-xs uppercase tracking-widest">Serial No.</p>
           <p className="font-mono text-3xl font-bold tabular-nums text-accent">#{loc.serial}</p>
         </div>
       )}
@@ -2075,7 +2565,7 @@ function QRDisplayPage() {
       <div className="mt-4 flex items-center gap-2 text-sm">
         {loc?.type === "qr_dynamic" ? (
           <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/15 text-accent border border-accent/30">
-            <Zap className="w-4 h-4" />Kode dinamis · sekali pakai — seri berganti tiap scan
+            <Zap className="w-4 h-4" />Dynamic code · single-use — serial changes per scan
           </span>
         ) : loc ? (
           <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 text-white/70 border border-white/20">
@@ -2083,7 +2573,8 @@ function QRDisplayPage() {
           </span>
         ) : null}
       </div>
-      <p className="text-white/40 text-xs mt-3">Buka aplikasi Zylora di ponsel lalu pindai kode di atas</p>
+      <p className="text-white/40 text-xs mt-3">Open the Zylora app on your phone and scan the code above</p>
+      <p className="text-white/30 text-[11px] mt-1 flex items-center gap-1.5"><RefreshCw className="w-3 h-3" />Auto-refresh in {tick}s</p>
       {err && <p className="text-red-400 text-xs mt-3">{err}</p>}
       <p className="absolute bottom-6 text-white/30 text-[11px] font-mono">{fmtDate(now)}</p>
       <VersionTag className="absolute bottom-6 right-8 text-white/25 text-[11px] font-mono" />
@@ -2102,7 +2593,7 @@ export default function App() {
 
   // Sumber kebenaran: backend Zylora (REST API). Data admin hanya diambil untuk
   // peran 'control' (panel). Karyawan & display tak butuh hook admin.
-  const { attendance, leaveRequests, employees, locations, authed, token, connected, login, logout,
+  const { attendance, leaveRequests, employees, locations, authed, restoring, token, connected, login, logout,
     approveLeave, rejectLeave, createEmployee, updateEmployee, deleteEmployee, resetEmployeeCode,
     createLocation, createLocationQr } = useBackendData(APP_ROLE === "control");
 
@@ -2121,14 +2612,18 @@ export default function App() {
       <div className="h-screen flex items-center justify-center bg-[#0D1B2A] p-6 text-center" style={{ fontFamily: "var(--font-sans)" }}>
         <div className="max-w-sm">
           <div className="w-14 h-14 rounded-2xl bg-[#1B3D72] flex items-center justify-center mx-auto mb-4"><Monitor className="w-7 h-7 text-white" /></div>
-          <h2 className="text-white font-bold text-lg mb-2">Sistem Kontrol khusus Desktop</h2>
-          <p className="text-white/60 text-sm">Panel admin tidak tersedia di aplikasi HP/Android. Buka aplikasi <b>desktop</b> (Windows/macOS/Linux) Zylora Sistem Kontrol.</p>
+          <h2 className="text-white font-bold text-lg mb-2">Control System is Desktop-only</h2>
+          <p className="text-white/60 text-sm">The admin panel isn't available on the phone/Android app. Open the Zylora Control System <b>desktop</b> app (Windows/macOS/Linux).</p>
         </div>
       </div>
     );
   }
+  // Saat reload + ada token tersimpan: tampilkan skeleton selama validasi token,
+  // BUKAN layar login (memperbaiki "tiap refresh balik ke login").
+  if (APP_ROLE === "control" && restoring && !authed) return <ControlSkeleton />;
   if (APP_ROLE === "control") return (
     <div className="h-screen overflow-hidden bg-background" style={{ fontFamily: "var(--font-sans)" }}>
+      <Toaster richColors position="top-center" />
       <QRLokasiControlPanel attendance={attendance} leaveRequests={leaveRequests}
         onApproveLeave={approveLeave} onRejectLeave={rejectLeave}
         employees={employees} onCreateEmployee={createEmployee} onUpdateEmployee={updateEmployee}
@@ -2145,8 +2640,8 @@ export default function App() {
     <div className="h-screen flex items-center justify-center bg-[#0D1B2A] p-6 text-center" style={{ fontFamily: "var(--font-sans)" }}>
       <div className="max-w-md">
         <div className="w-14 h-14 rounded-2xl bg-[#1B3D72] flex items-center justify-center mx-auto mb-4"><Activity className="w-7 h-7 text-accent" /></div>
-        <h2 className="text-white font-bold text-lg mb-2">Zylora Absensi</h2>
-        <p className="text-white/60 text-sm">Build ini tidak menetapkan peran. Jalankan dengan <code className="text-accent">VITE_ROLE=employee | control | display</code> (lihat skrip dev:employee / dev:control / dev:display).</p>
+        <h2 className="text-white font-bold text-lg mb-2">Zylora Attendance</h2>
+        <p className="text-white/60 text-sm">This build has no role set. Run with <code className="text-accent">VITE_ROLE=employee | control | display</code> (see the dev:employee / dev:control / dev:display scripts).</p>
       </div>
     </div>
   );

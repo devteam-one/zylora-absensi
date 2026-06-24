@@ -1,7 +1,7 @@
 {
   "name": "Zylora",
   "product": "Zylora Absensi & HRIS",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "channel": "stable",
   "apiContract": "v1"
 }

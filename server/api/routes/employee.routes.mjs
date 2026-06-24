@@ -17,7 +17,7 @@ const TOKEN_TTL = 60 * 60 * 12; // 12 jam
 // Profil karyawan saat ini (dari token).
 function meEmployee(ctx) {
   const emp = get("SELECT * FROM employees WHERE id = ?", ctx.auth.employeeId);
-  if (!emp || emp.status !== "active") throw new ApiError(403, "Akun karyawan nonaktif", "INACTIVE");
+  if (!emp || emp.status !== "active") throw new ApiError(403, "Employee account is inactive", "INACTIVE");
   return emp;
 }
 
@@ -34,9 +34,9 @@ export function register(router) {
     const ident = String(b.employeeId).trim();
     const emp = get("SELECT * FROM employees WHERE id = ? OR (email IS NOT NULL AND lower(email) = lower(?))", ident, ident);
     if (!emp || !emp.password_hash || !verifyPassword(b.password, emp.password_hash)) {
-      throw new ApiError(401, "ID karyawan atau PIN salah", "BAD_CREDENTIALS");
+      throw new ApiError(401, "Wrong employee ID or PIN", "BAD_CREDENTIALS");
     }
-    if (emp.status !== "active") throw new ApiError(403, "Akun karyawan nonaktif", "INACTIVE");
+    if (emp.status !== "active") throw new ApiError(403, "Employee account is inactive", "INACTIVE");
 
     const { token, jti, exp, expSec } = signJWT(
       { sub: emp.id, cid: emp.company_id, role: "employee" }, TOKEN_TTL,
@@ -134,7 +134,7 @@ export function register(router) {
     requireFields(b, ["start_date", "end_date"]);
     const type = ["cuti", "izin", "sakit"].includes(b.type) ? b.type : "cuti";
     if (String(b.end_date) < String(b.start_date)) {
-      throw new ApiError(400, "Tanggal selesai tidak boleh sebelum tanggal mulai", "BAD_RANGE");
+      throw new ApiError(400, "End date can't be before start date", "BAD_RANGE");
     }
     const id = genId("leave");
     run(

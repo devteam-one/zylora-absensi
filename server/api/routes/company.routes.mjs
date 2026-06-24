@@ -14,7 +14,7 @@ const MAX_LOGO_LEN = 2_000_000;
 
 function currentCompany(ctx) {
   const c = get("SELECT * FROM companies WHERE id = ?", ctx.auth.companyId);
-  if (!c) throw new ApiError(404, "Perusahaan tidak ditemukan", "NOT_FOUND");
+  if (!c) throw new ApiError(404, "Company not found", "NOT_FOUND");
   return c;
 }
 
@@ -47,7 +47,7 @@ export function register(router) {
     for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
     if (b.work_hours?.start) { sets.push("work_start = ?"); vals.push(b.work_hours.start); }
     if (b.work_hours?.end) { sets.push("work_end = ?"); vals.push(b.work_hours.end); }
-    assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
+    assert(sets.length > 0, 400, "No fields to update");
     run(`UPDATE companies SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.auth.companyId);
     audit(ctx, "company.update", Object.keys(fields));
     json(ctx.res, 200, { message: "Company profile updated" });
@@ -57,7 +57,7 @@ export function register(router) {
   // data URL base64 di body JSON — cukup untuk integrasi frontend tanpa storage.
   router.post("/api/company/logo", requireControl, (ctx) => {
     const url = ctx.body.logo_url || ctx.body.logo;
-    assert(typeof url === "string" && url.length > 0, 400, "logo_url / logo wajib diisi");
+    assert(typeof url === "string" && url.length > 0, 400, "logo_url / logo is required");
     assert(url.length <= MAX_LOGO_LEN, 413, "Logo terlalu besar (maks ~2MB)");
     run("UPDATE companies SET logo_url = ? WHERE id = ?", url, ctx.auth.companyId);
     audit(ctx, "company.logo");
@@ -81,7 +81,7 @@ export function register(router) {
     const sets = [];
     const vals = [];
     if (b.timezone !== undefined) {
-      assert(safeTz(b.timezone), 400, "Zona waktu tidak dikenal (pakai nama IANA, mis. Asia/Jakarta)");
+      assert(safeTz(b.timezone), 400, "Unknown time zone (use IANA name, e.g. Asia/Jakarta)");
       sets.push("timezone = ?"); vals.push(b.timezone);
     }
     if (b.language !== undefined) { sets.push("language = ?"); vals.push(b.language); }
@@ -92,10 +92,10 @@ export function register(router) {
     }
     if (b.base_currency !== undefined) {
       const cur = String(b.base_currency).toUpperCase();
-      assert(/^[A-Z]{3}$/.test(cur), 400, "base_currency harus kode ISO 4217 3 huruf (IDR, USD, EUR, SGD, ...)");
+      assert(/^[A-Z]{3}$/.test(cur), 400, "base_currency must be a 3-letter ISO 4217 code (IDR, USD, EUR, SGD, ...)");
       sets.push("base_currency = ?"); vals.push(cur);
     }
-    assert(sets.length > 0, 400, "Tidak ada konfigurasi yang diperbarui");
+    assert(sets.length > 0, 400, "No settings to update");
     run(`UPDATE companies SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.auth.companyId);
     audit(ctx, "company.settings", b);
     const c = currentCompany(ctx);

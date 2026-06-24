@@ -16,7 +16,7 @@ export function register(router) {
       FROM location_codes lc JOIN locations l ON l.id = lc.location_id
       WHERE lc.status = 'active'
       ORDER BY (lc.type = 'qr_dynamic') DESC, lc.created_at DESC LIMIT 1`);
-    if (!code) throw new ApiError(404, "Belum ada lokasi/kode aktif", "NO_LOCATION");
+    if (!code) throw new ApiError(404, "No active location/code", "NO_LOCATION");
 
     const token = code.type === "qr_dynamic"
       ? dynamicToken(code.location_id, code.interval || "hourly", code.serial || 0)

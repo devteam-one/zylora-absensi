@@ -8,14 +8,14 @@ import { requireControl, audit } from "../lib/middleware.mjs";
 
 function ownedLocation(ctx, id) {
   const loc = get("SELECT * FROM locations WHERE id = ? AND company_id = ?", id, ctx.auth.companyId);
-  if (!loc) throw new ApiError(404, "Lokasi tidak ditemukan", "NOT_FOUND");
+  if (!loc) throw new ApiError(404, "Location not found", "NOT_FOUND");
   return loc;
 }
 
 function ownedCode(ctx, locationId, codeId) {
   ownedLocation(ctx, locationId);
   const code = get("SELECT * FROM location_codes WHERE id = ? AND location_id = ?", codeId, locationId);
-  if (!code) throw new ApiError(404, "Kode tidak ditemukan", "NOT_FOUND");
+  if (!code) throw new ApiError(404, "Code not found", "NOT_FOUND");
   return code;
 }
 
@@ -78,10 +78,10 @@ export function register(router) {
     if (b.lat !== undefined) { sets.push("lat = ?"); vals.push(b.lat === null ? null : Number(b.lat)); }
     if (b.lng !== undefined) { sets.push("lng = ?"); vals.push(b.lng === null ? null : Number(b.lng)); }
     if (b.radius_m !== undefined) {
-      assert(Number(b.radius_m) >= 0, 400, "radius_m tidak boleh negatif");
+      assert(Number(b.radius_m) >= 0, 400, "radius_m cannot be negative");
       sets.push("radius_m = ?"); vals.push(Number(b.radius_m));
     }
-    assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
+    assert(sets.length > 0, 400, "No fields to update");
     run(`UPDATE locations SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.params.locationId);
     audit(ctx, "location.update", { id: ctx.params.locationId });
     const l = ownedLocation(ctx, ctx.params.locationId);
@@ -158,7 +158,7 @@ export function register(router) {
     if (b.interval !== undefined) { sets.push("interval = ?"); vals.push(b.interval); }
     if (b.active_hours?.start !== undefined) { sets.push("active_start = ?"); vals.push(b.active_hours.start); }
     if (b.active_hours?.end !== undefined) { sets.push("active_end = ?"); vals.push(b.active_hours.end); }
-    assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
+    assert(sets.length > 0, 400, "No fields to update");
     sets.push("updated_at = ?"); vals.push(nowISO());
     run(`UPDATE location_codes SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.params.codeId);
     audit(ctx, "code.update", { codeId: ctx.params.codeId });
@@ -168,7 +168,7 @@ export function register(router) {
   // Regenerasi QR dinamis manual (paksa token jendela baru).
   router.post("/api/locations/:locationId/codes/:codeId/refresh", requireControl, (ctx) => {
     const code = ownedCode(ctx, ctx.params.locationId, ctx.params.codeId);
-    assert(code.type === "qr_dynamic", 400, "Hanya kode dinamis yang bisa di-refresh", "NOT_DYNAMIC");
+    assert(code.type === "qr_dynamic", 400, "Only dynamic codes can be refreshed", "NOT_DYNAMIC");
     const newSerial = (code.serial || 0) + 1;
     const token = dynamicToken(ctx.params.locationId, code.interval || "hourly", newSerial);
     const expires_at = new Date(Date.now() + (code.interval === "daily" ? 86400 : 3600) * 1000).toISOString();

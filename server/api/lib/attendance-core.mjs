@@ -49,6 +49,25 @@ export const hhmm = (d = new Date()) => fmtFor(DEFAULT_TZ).time.format(d);
 export const todayStrTz = (tz, d = new Date()) => fmtFor(safeTz(tz) || DEFAULT_TZ).date.format(d);
 export const hhmmTz = (tz, d = new Date()) => fmtFor(safeTz(tz) || DEFAULT_TZ).time.format(d);
 
+// "HH:MM" → menit sejak 00:00 (null bila tak valid).
+export const toMin = (hhmm) => {
+  if (!hhmm || typeof hhmm !== "string") return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+};
+// Menit keterlambatan, MENANGANI shift lintas tengah malam (schedOut < schedIn).
+// Normal (08:00–17:00): telat = checkin − masuk. Overnight (23:00–08:00):
+// check-in sore ≥ masuk → telat = selisih; check-in pagi (≤ keluar) → telat =
+// checkin + 1440 − masuk; di jeda siang dianggap datang awal (0).
+export function lateMinutes(ci, schedIn, schedOut) {
+  if (ci == null || schedIn == null) return 0;
+  const overnight = schedOut != null && schedOut < schedIn;
+  if (!overnight) return ci > schedIn ? ci - schedIn : 0;
+  if (ci >= schedIn) return ci - schedIn;
+  if (schedOut != null && ci <= schedOut) return ci + 1440 - schedIn;
+  return 0;
+}
+
 // Jarak dua titik GPS dalam meter (haversine).
 export function distanceM(lat1, lng1, lat2, lng2) {
   const R = 6_371_000;
@@ -62,7 +81,7 @@ export function distanceM(lat1, lng1, lat2, lng2) {
 
 // Cari lokasi sah dari token QR (statis exact-match / dinamis dalam jendela waktu).
 export function resolveLocation(token) {
-  if (typeof token !== "string") throw new ApiError(400, "Token lokasi wajib", "NO_TOKEN");
+  if (typeof token !== "string") throw new ApiError(400, "Location token is required", "NO_TOKEN");
   if (token.startsWith("ZYL-DYN-")) {
     const locationId = token.split("-")[2];
     const code = get(
@@ -75,21 +94,21 @@ export function resolveLocation(token) {
     // Seri token tak cocok = QR sudah dipindai (sekali pakai) atau kedaluwarsa.
     const used = code && serialOf(token) != null && serialOf(token) < (code.serial || 0);
     throw new ApiError(400, used
-      ? "QR sudah dipindai (sekali pakai) — minta QR terbaru di layar lokasi"
-      : "QR dinamis kedaluwarsa atau tidak valid", "BAD_QR");
+      ? "QR already scanned (single-use) — get the latest QR on the location screen"
+      : "Dynamic QR expired or invalid", "BAD_QR");
   }
   const code = get("SELECT * FROM location_codes WHERE token = ? AND status = 'active'", token);
-  if (!code) throw new ApiError(400, "QR lokasi tidak valid", "BAD_QR");
+  if (!code) throw new ApiError(400, "Invalid location QR", "BAD_QR");
   return get("SELECT * FROM locations WHERE id = ?", code.location_id);
 }
 
 // Validasi posisi terhadap radius lokasi (dilewati bila lokasi tak punya koordinat).
 export function checkGeo(loc, lat, lng) {
   if (loc.lat == null || loc.lng == null) return;
-  assert(lat != null && lng != null, 400, "Koordinat GPS wajib dikirim", "NO_GPS");
+  assert(lat != null && lng != null, 400, "GPS coordinates are required", "NO_GPS");
   const dist = distanceM(loc.lat, loc.lng, lat, lng);
   if (dist > loc.radius_m) {
-    throw new ApiError(403, `Di luar radius lokasi (${Math.round(dist)}m > ${loc.radius_m}m)`, "OUT_OF_RANGE");
+    throw new ApiError(403, `Outside location radius (${Math.round(dist)}m > ${loc.radius_m}m)`, "OUT_OF_RANGE");
   }
 }
 
@@ -122,15 +141,16 @@ export function recordCheckin(emp, loc, { lat, lng, method } = {}) {
   // tidak masuk. Presensi & cuti dua tabel terpisah, jadi direkonsiliasi di sini.
   const leave = approvedLeaveOn(emp.id, date);
   if (leave) {
-    throw new ApiError(409, `Sedang ${leave.type} (disetujui) hari ini — tidak perlu absen`, "ON_LEAVE");
+    throw new ApiError(409, `On ${leave.type} (approved) today — no need to check in`, "ON_LEAVE");
   }
 
   const time = hhmmTz(tz);
-  const status = time > (emp.schedule_in || "08:00") ? "terlambat" : "hadir";
+  // Sadar shift lintas tengah malam (mis. 23:00–08:00) — bukan sekadar string compare.
+  const status = lateMinutes(toMin(time), toMin(emp.schedule_in || "08:00"), toMin(emp.schedule_out)) > 0 ? "terlambat" : "hadir";
   const m = method === "terminal" ? "terminal" : "qr_lokasi";
 
   const existing = get("SELECT * FROM attendance WHERE employee_id = ? AND date = ?", emp.id, date);
-  if (existing?.check_in) throw new ApiError(409, "Sudah check-in hari ini", "ALREADY_IN");
+  if (existing?.check_in) throw new ApiError(409, "Already checked in today", "ALREADY_IN");
 
   if (existing) {
     run("UPDATE attendance SET check_in = ?, status = ?, method = ?, location_id = ?, lat = ?, lng = ? WHERE id = ?",
@@ -151,7 +171,7 @@ export function recordCheckout(emp, loc) {
   const tz = companyTz(emp.company_id);
   const date = todayStrTz(tz);
   const rec = get("SELECT * FROM attendance WHERE employee_id = ? AND date = ?", emp.id, date);
-  if (!rec?.check_in) throw new ApiError(409, "Belum check-in hari ini", "NOT_IN");
+  if (!rec?.check_in) throw new ApiError(409, "Not checked in today", "NOT_IN");
   const time = hhmmTz(tz);
   run("UPDATE attendance SET check_out = ? WHERE id = ?", time, rec.id);
   if (loc) bumpCodeSerial(loc.id); // scan checkout → seri berganti juga

@@ -5,7 +5,7 @@ import { ApiError } from "./http.mjs";
 export function requireFields(body, fields) {
   const missing = fields.filter((f) => body[f] === undefined || body[f] === null || body[f] === "");
   if (missing.length) {
-    throw new ApiError(400, `Field wajib hilang: ${missing.join(", ")}`, "VALIDATION");
+    throw new ApiError(400, `Missing required field(s): ${missing.join(", ")}`, "VALIDATION");
   }
 }
 

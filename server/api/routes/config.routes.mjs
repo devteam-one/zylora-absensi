@@ -16,7 +16,7 @@ export function register(router) {
   const HHMM = /^\d{2}:\d{2}$/;
   router.post("/api/shifts", requireControl, (ctx) => {
     requireFields(ctx.body, ["name", "start", "end"]);
-    assert(HHMM.test(ctx.body.start) && HHMM.test(ctx.body.end), 400, "start & end harus format HH:MM");
+    assert(HHMM.test(ctx.body.start) && HHMM.test(ctx.body.end), 400, "start & end must be in HH:MM format");
     const id = genId("shift");
     run("INSERT INTO shifts (id, company_id, name, start, end, created_at) VALUES (?,?,?,?,?,?)",
       id, ctx.auth.companyId, ctx.body.name, ctx.body.start, ctx.body.end, nowISO());
@@ -26,7 +26,7 @@ export function register(router) {
 
   router.put("/api/shifts/:id", requireControl, (ctx) => {
     const s = get("SELECT * FROM shifts WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId);
-    if (!s) throw new ApiError(404, "Shift tidak ditemukan", "NOT_FOUND");
+    if (!s) throw new ApiError(404, "Shift not found", "NOT_FOUND");
     const sets = [];
     const vals = [];
     for (const k of ["name", "start", "end"]) {
@@ -35,7 +35,7 @@ export function register(router) {
         sets.push(`${k} = ?`); vals.push(ctx.body[k]);
       }
     }
-    assert(sets.length > 0, 400, "Tidak ada field yang diperbarui");
+    assert(sets.length > 0, 400, "No fields to update");
     run(`UPDATE shifts SET ${sets.join(", ")} WHERE id = ?`, ...vals, ctx.params.id);
     audit(ctx, "shift.update", { id: ctx.params.id });
     json(ctx.res, 200, { message: "Shift updated" });
@@ -43,7 +43,7 @@ export function register(router) {
 
   router.delete("/api/shifts/:id", requireControl, (ctx) => {
     if (!get("SELECT 1 FROM shifts WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
-      throw new ApiError(404, "Shift tidak ditemukan", "NOT_FOUND");
+      throw new ApiError(404, "Shift not found", "NOT_FOUND");
     run("DELETE FROM shifts WHERE id = ?", ctx.params.id);
     audit(ctx, "shift.delete", { id: ctx.params.id });
     noContent(ctx.res);
@@ -72,7 +72,7 @@ export function register(router) {
     const b = ctx.body;
     requireFields(b, ["employeeId", "start_date", "end_date"]);
     const emp = get("SELECT id FROM employees WHERE id = ? AND company_id = ?", b.employeeId, ctx.auth.companyId);
-    if (!emp) throw new ApiError(404, "Karyawan tidak ditemukan", "NOT_FOUND");
+    if (!emp) throw new ApiError(404, "Employee not found", "NOT_FOUND");
     const id = genId("leave");
     run(
       `INSERT INTO leave_requests (id, company_id, employee_id, type, start_date, end_date, reason, status, created_at)
@@ -87,7 +87,7 @@ export function register(router) {
   router.post("/api/leaves/:requestId/approve", requireControl, (ctx) => {
     const lr = get("SELECT * FROM leave_requests WHERE id = ? AND company_id = ?",
       ctx.params.requestId, ctx.auth.companyId);
-    if (!lr) throw new ApiError(404, "Pengajuan tidak ditemukan", "NOT_FOUND");
+    if (!lr) throw new ApiError(404, "Request not found", "NOT_FOUND");
     const approved = ctx.body.approved !== false;
     const status = approved ? "approved" : "rejected";
     run("UPDATE leave_requests SET status = ?, notes = ?, decided_by = ?, decided_at = ? WHERE id = ?",
@@ -99,7 +99,7 @@ export function register(router) {
   // Hapus pengajuan cuti/izin.
   router.delete("/api/leaves/:requestId", requireControl, (ctx) => {
     if (!get("SELECT 1 FROM leave_requests WHERE id = ? AND company_id = ?", ctx.params.requestId, ctx.auth.companyId))
-      throw new ApiError(404, "Pengajuan tidak ditemukan", "NOT_FOUND");
+      throw new ApiError(404, "Request not found", "NOT_FOUND");
     run("DELETE FROM leave_requests WHERE id = ?", ctx.params.requestId);
     audit(ctx, "leave.delete", { requestId: ctx.params.requestId });
     noContent(ctx.res);
@@ -117,9 +117,9 @@ export function register(router) {
     const b = ctx.body;
     requireFields(b, ["employeeId", "deviceId"]);
     const emp = get("SELECT id FROM employees WHERE id = ? AND company_id = ?", b.employeeId, ctx.auth.companyId);
-    if (!emp) throw new ApiError(404, "Karyawan tidak ditemukan", "NOT_FOUND");
+    if (!emp) throw new ApiError(404, "Employee not found", "NOT_FOUND");
     if (get("SELECT 1 FROM devices WHERE company_id = ? AND device_id = ?", ctx.auth.companyId, b.deviceId)) {
-      throw new ApiError(409, "Perangkat sudah terdaftar", "DEVICE_EXISTS");
+      throw new ApiError(409, "Device already registered", "DEVICE_EXISTS");
     }
     const id = genId("dev");
     run("INSERT INTO devices (id, company_id, employee_id, device_id, label, created_at) VALUES (?,?,?,?,?,?)",
@@ -131,8 +131,8 @@ export function register(router) {
   // Ubah label perangkat.
   router.put("/api/devices/:id", requireControl, (ctx) => {
     if (!get("SELECT 1 FROM devices WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
-      throw new ApiError(404, "Perangkat tidak ditemukan", "NOT_FOUND");
-    assert(ctx.body.label !== undefined, 400, "Tidak ada field yang diperbarui");
+      throw new ApiError(404, "Device not found", "NOT_FOUND");
+    assert(ctx.body.label !== undefined, 400, "No fields to update");
     run("UPDATE devices SET label = ? WHERE id = ?", ctx.body.label || null, ctx.params.id);
     audit(ctx, "device.update", { id: ctx.params.id });
     json(ctx.res, 200, { message: "Device updated" });
@@ -141,7 +141,7 @@ export function register(router) {
   // Cabut perangkat terdaftar.
   router.delete("/api/devices/:id", requireControl, (ctx) => {
     if (!get("SELECT 1 FROM devices WHERE id = ? AND company_id = ?", ctx.params.id, ctx.auth.companyId))
-      throw new ApiError(404, "Perangkat tidak ditemukan", "NOT_FOUND");
+      throw new ApiError(404, "Device not found", "NOT_FOUND");
     run("DELETE FROM devices WHERE id = ?", ctx.params.id);
     audit(ctx, "device.delete", { id: ctx.params.id });
     noContent(ctx.res);

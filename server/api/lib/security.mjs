@@ -29,7 +29,7 @@ function resolveSecret() {
   if (env && env !== DEV_FALLBACK_SECRET && env.length >= 16) return env;
 
   const why = !env
-    ? "ZYLORA_SECRET belum di-set"
+    ? "ZYLORA_SECRET is not set"
     : env === DEV_FALLBACK_SECRET
       ? "ZYLORA_SECRET masih bernilai fallback dev bawaan"
       : "ZYLORA_SECRET terlalu pendek (minimal 16 karakter)";

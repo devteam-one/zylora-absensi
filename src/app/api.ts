@@ -133,6 +133,8 @@ export const api = {
   // Dashboard admin (butuh token)
   attendance: (token: string, date?: string) =>
     req<ApiAttendanceRow[]>(`/api/attendance${date ? `?date=${date}` : ""}`, { token }),
+  attendanceRecap: (token: string, period?: string) =>
+    req<{ period: string; employees: Array<{ employeeId: string; name: string; position: string | null; department: string | null; schedule_in: string | null; schedule_out: string | null; days_worked: number; late_days: number; late_minutes: number; overtime_hours: number; absent_days: number; leave_days: number }> }>(`/api/attendance/recap${period ? `?period=${period}` : ""}`, { token }),
   leaves: (token: string) =>
     req<ApiLeaveRow[]>("/api/leaves/requests", { token }),
   approveLeave: (token: string, id: string, approved: boolean, notes?: string) =>

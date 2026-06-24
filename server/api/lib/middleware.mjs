@@ -12,13 +12,13 @@ import { ApiError } from "./http.mjs";
 export function requireAuth(ctx) {
   const header = ctx.req.headers["authorization"] || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-  if (!token) throw new ApiError(401, "Token akses tidak ada", "NO_TOKEN");
+  if (!token) throw new ApiError(401, "Missing access token", "NO_TOKEN");
 
   const payload = verifyJWT(token);
-  if (!payload) throw new ApiError(401, "Token tidak valid atau kedaluwarsa", "BAD_TOKEN");
+  if (!payload) throw new ApiError(401, "Invalid or expired token", "BAD_TOKEN");
 
   const session = get("SELECT revoked FROM sessions WHERE jti = ?", payload.jti);
-  if (!session || session.revoked) throw new ApiError(401, "Sesi sudah berakhir", "SESSION_REVOKED");
+  if (!session || session.revoked) throw new ApiError(401, "Session has ended", "SESSION_REVOKED");
 
   const role = payload.role || "control";
   ctx.auth = {
@@ -36,9 +36,9 @@ export function requireAuth(ctx) {
 // RBAC: batasi rute hanya untuk peran tertentu. Pakai SETELAH requireAuth.
 export function requireRole(...roles) {
   return (ctx) => {
-    if (!ctx.auth) throw new ApiError(401, "Belum terautentikasi", "NO_AUTH");
+    if (!ctx.auth) throw new ApiError(401, "Not authenticated", "NO_AUTH");
     if (!roles.includes(ctx.auth.role)) {
-      throw new ApiError(403, "Akses ditolak untuk peran ini", "FORBIDDEN");
+      throw new ApiError(403, "Access denied for this role", "FORBIDDEN");
     }
   };
 }
@@ -48,14 +48,14 @@ export function requireRole(...roles) {
 export function requireControl(ctx) {
   requireAuth(ctx);
   if (ctx.auth.role !== "control") {
-    throw new ApiError(403, "Endpoint khusus sistem kontrol", "FORBIDDEN");
+    throw new ApiError(403, "Control-system only endpoint", "FORBIDDEN");
   }
 }
 
 export function requireEmployee(ctx) {
   requireAuth(ctx);
   if (ctx.auth.role !== "employee") {
-    throw new ApiError(403, "Endpoint khusus karyawan", "FORBIDDEN");
+    throw new ApiError(403, "Employee only endpoint", "FORBIDDEN");
   }
 }
 
@@ -78,7 +78,7 @@ export function rateLimit({ max = 30, windowMs = 15 * 60 * 1000, by } = {}) {
     }
     b.count++;
     if (b.count > max) {
-      throw new ApiError(429, "Terlalu banyak permintaan, coba lagi nanti", "RATE_LIMITED");
+      throw new ApiError(429, "Too many requests, try again later", "RATE_LIMITED");
     }
   };
 }

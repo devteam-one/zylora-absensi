@@ -68,7 +68,7 @@ function readBody(req) {
       try {
         resolve(JSON.parse(raw));
       } catch {
-        reject(new ApiError(400, "Body bukan JSON valid", "BAD_JSON"));
+        reject(new ApiError(400, "Body is not valid JSON", "BAD_JSON"));
       }
     });
     req.on("error", reject);
@@ -141,7 +141,7 @@ export function Router() {
         if (res.writableEnded) break; // respons sudah dikirim → stop
       }
       if (!res.writableEnded) {
-        fail(res, 500, "Handler tidak mengembalikan respons", "NO_RESPONSE");
+        fail(res, 500, "Handler did not return a response", "NO_RESPONSE");
       }
     } catch (err) {
       if (res.writableEnded) return;

@@ -6,8 +6,32 @@ import { json } from "../lib/http.mjs";
 import { all } from "../lib/db.mjs";
 import { requireControl } from "../lib/middleware.mjs";
 import { todayStrTz, companyTz } from "../lib/attendance-core.mjs";
+import { computeMetrics } from "../lib/payroll-core.mjs";
 
 export function register(router) {
+  // Rekap kehadiran DETAIL per karyawan untuk satu periode (?period=YYYY-MM).
+  // Metrik sama dgn payroll (hadir/telat/menit telat/lembur/alpa/cuti) → satu
+  // sumber kebenaran, konsisten dengan slip gaji.
+  router.get("/api/attendance/recap", requireControl, (ctx) => {
+    const period = /^\d{4}-\d{2}$/.test(ctx.query.period || "")
+      ? ctx.query.period
+      : todayStrTz(companyTz(ctx.auth.companyId)).slice(0, 7);
+    const emps = all(
+      "SELECT * FROM employees WHERE company_id = ? AND status = 'active' ORDER BY name",
+      ctx.auth.companyId,
+    );
+    const rows = emps.map((e) => {
+      const m = computeMetrics(e, period);
+      return {
+        employeeId: e.id, name: e.name, position: e.position, department: e.department,
+        schedule_in: e.schedule_in, schedule_out: e.schedule_out,
+        days_worked: m.days_worked, late_days: m.late_days, late_minutes: m.late_minutes,
+        overtime_hours: m.overtime_hours, absent_days: m.absent_days, leave_days: m.leave_days,
+      };
+    });
+    json(ctx.res, 200, { period, employees: rows });
+  });
+
   // Papan presensi hari ini untuk dashboard admin (?date=YYYY-MM-DD).
   router.get("/api/attendance", requireControl, (ctx) => {
     // "Hari ini" dihitung di zona perusahaan agar cocok dengan tanggal saat dicatat.

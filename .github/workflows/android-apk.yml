@@ -20,11 +20,18 @@ on:
 
 env:
   API_URL: ${{ github.event.inputs.api_url || 'https://api.13-218-74-178.sslip.io' }}
-  ROLE: ${{ github.event.inputs.role || 'employee' }}
 
 jobs:
   apk:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # push → bungkus KEDUA APK (employee + display) sekaligus.
+        # dispatch → hormati input 'role' (satu saja).
+        role: ${{ (github.event_name == 'workflow_dispatch') && fromJSON(format('["{0}"]', github.event.inputs.role)) || fromJSON('["employee","display"]') }}
+    env:
+      ROLE: ${{ matrix.role }}
     steps:
       - uses: actions/checkout@v7
 
@@ -79,7 +86,7 @@ jobs:
           # Android menganggap APK baru sebagai pembaruan & membuang app lama.
           VC="${{ github.run_number }}"
           sed -i -E "s/versionCode [0-9]+/versionCode ${VC}/" app/build.gradle
-          sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.0.${VC}\"/" app/build.gradle
+          sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.1.${VC}\"/" app/build.gradle
           grep -E "versionCode|versionName" app/build.gradle
 
       - name: Build APK + AAB (release; ber-tanda-tangan bila keystore di-set)

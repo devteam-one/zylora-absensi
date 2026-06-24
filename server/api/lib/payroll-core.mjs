@@ -4,7 +4,7 @@
 // (YYYY-MM), lalu menerapkan komponen gaji (tetap/berbasis) + aturan otomatis.
 // ─────────────────────────────────────────────────────────────────────────────
 import { all } from "./db.mjs";
-import { todayStr } from "./attendance-core.mjs"; // "hari ini" sadar-zona (ZYLORA_TZ), bukan UTC
+import { todayStr, lateMinutes } from "./attendance-core.mjs"; // "hari ini" sadar-zona + telat sadar-shift
 
 const toMin = (hhmm) => {
   if (!hhmm || typeof hhmm !== "string") return null;
@@ -27,8 +27,8 @@ export function computeMetrics(emp, period) {
   for (const r of rows) {
     if (r.check_in) {
       days_worked++; datesWithCheckin.add(r.date);
-      const ci = toMin(r.check_in);
-      if (ci != null && ci > schedIn) { late_minutes += ci - schedIn; late_days++; }
+      const lm = lateMinutes(toMin(r.check_in), schedIn, schedOut); // sadar shift malam
+      if (lm > 0) { late_minutes += lm; late_days++; }
     }
     if (r.check_out) {
       const co = toMin(r.check_out);
@@ -51,12 +51,16 @@ export function computeMetrics(emp, period) {
     while (d <= end) { leaveDates.add(d); if (d === end) break; d = nextDay(d); }
   }
 
-  // Alpa = hari kerja (Sen-Jum) sampai hari ini tanpa check-in & tanpa cuti disetujui.
+  // Alpa = hari kerja (Sen-Jum) tanpa check-in & tanpa cuti disetujui, MULAI dari
+  // tanggal masuk karyawan (start_date) sampai hari ini — jadi karyawan baru TIDAK
+  // dihitung bolos untuk hari sebelum ia bergabung.
   const today = todayStr();
+  const joinDate = emp.start_date || null;
   let absent_days = 0;
   for (let day = 1; day <= dim; day++) {
     const ds = `${period}-${String(day).padStart(2, "0")}`;
     if (ds > today) break;
+    if (joinDate && ds < joinDate) continue; // sebelum karyawan masuk → bukan alpa
     const wd = new Date(`${ds}T00:00:00`).getDay(); // 0=Min .. 6=Sab
     if (wd === 0 || wd === 6) continue;
     if (datesWithCheckin.has(ds) || leaveDates.has(ds)) continue;
@@ -78,21 +82,23 @@ export function computePayslip(emp, period, components, rules) {
   let earnings = 0, deductions = 0;
 
   for (const c of components) {
-    let amt = 0;
+    // qty/rate/note → rincian transparan di slip ("235 menit × Rp1.000/menit").
+    let amt = 0, qty = null, rate = null, note = "";
     switch (c.basis) {
-      case "fixed": amt = c.value; break;
-      case "percent_base": amt = base * c.value / 100; break;
-      case "per_late_min": amt = m.late_minutes * c.value; break;
-      case "per_absent_day": amt = m.absent_days * c.value; break;
-      case "per_overtime_hour": amt = m.overtime_hours * c.value; break;
+      case "fixed": amt = c.value; note = "tetap"; break;
+      case "percent_base": amt = base * c.value / 100; rate = c.value; note = `${c.value}% × gaji pokok`; break;
+      case "per_late_min": qty = m.late_minutes; rate = c.value; amt = qty * rate; note = `${qty} menit telat × ${rate}/menit`; break;
+      case "per_absent_day": qty = m.absent_days; rate = c.value; amt = qty * rate; note = `${qty} hari alpa × ${rate}/hari`; break;
+      case "per_overtime_hour": qty = m.overtime_hours; rate = c.value; amt = qty * rate; note = `${qty} jam lembur × ${rate}/jam`; break;
       default: amt = 0;
     }
     amt = Math.round(amt);
     if (amt === 0) continue;
     if (c.type === "earning") earnings += amt; else deductions += amt;
-    lines.push({ name: c.name, type: c.type, basis: c.basis, amount: amt });
+    lines.push({ name: c.name, type: c.type, basis: c.basis, amount: amt, qty, rate, note });
   }
 
+  const METRIC_ID = { late_days: "hari telat", late_minutes: "menit telat", overtime_hours: "jam lembur", absent_days: "hari alpa", leave_days: "hari cuti" };
   for (const r of rules) {
     if (!r.active) continue;
     const v = ({ late_days: m.late_days, late_minutes: m.late_minutes, overtime_hours: m.overtime_hours, absent_days: m.absent_days, leave_days: m.leave_days })[r.metric] ?? 0;
@@ -100,7 +106,9 @@ export function computePayslip(emp, period, components, rules) {
     if (!hit) continue;
     const amt = Math.round(r.amount);
     if (r.action === "bonus") earnings += amt; else deductions += amt;
-    lines.push({ name: r.name, type: r.action === "bonus" ? "earning" : "deduction", basis: "rule", amount: amt, note: `${r.metric} ${r.op} ${r.threshold}` });
+    // Catatan terbaca + nilai aktual: "telat 235 menit (aturan: ≥ 1 menit telat)".
+    const op = r.op === "gt" ? ">" : "≥";
+    lines.push({ name: r.name, type: r.action === "bonus" ? "earning" : "deduction", basis: "rule", amount: amt, qty: v, rate: null, note: `${v} ${METRIC_ID[r.metric] || r.metric} (aturan: ${op} ${r.threshold})` });
   }
 
   const net = Math.round(base + earnings - deductions);

@@ -9,29 +9,15 @@ import { requireAuth, requireControl, rateLimit, audit } from "../lib/middleware
 const TOKEN_TTL = 60 * 60 * 8; // 8 jam
 
 export function register(router) {
-  // Daftar admin + perusahaan sekaligus (transaksi).
-  router.post("/api/control/register", rateLimit({ max: 10 }), (ctx) => {
-    const b = ctx.body;
-    requireFields(b, ["name", "email", "password", "company_name"]);
-    assert(isEmail(b.email), 400, "Format email tidak valid");
-    assert(String(b.password).length >= 8, 400, "Password minimal 8 karakter");
-    if (get("SELECT 1 FROM admins WHERE email = ?", b.email)) {
-      throw new ApiError(409, "Email sudah terdaftar", "EMAIL_TAKEN");
-    }
-
-    const adminId = genId("adm");
-    const companyId = genId("co");
-    tx(() => {
-      run(
-        "INSERT INTO companies (id, name, address, contact_email, created_at) VALUES (?,?,?,?,?)",
-        companyId, b.company_name, b.company_address || null, b.email, nowISO(),
-      );
-      run(
-        "INSERT INTO admins (id, company_id, name, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)",
-        adminId, companyId, b.name, b.email, hashPassword(b.password), "control", nowISO(),
-      );
-    });
-    json(ctx.res, 201, { adminId, companyId });
+  // Self-register publik DIHAPUS (pengerasan keamanan). Akun Sistem Kontrol kini
+  // HANYA dibuat lewat shell di server: `node tools/register-admin.mjs ...`.
+  // Endpoint dipertahankan tapi selalu menolak, agar klien lama dapat pesan jelas.
+  router.post("/api/control/register", (ctx) => {
+    throw new ApiError(
+      403,
+      "Self-registration is disabled. Admin accounts are created by the operator via the server shell.",
+      "REGISTRATION_DISABLED",
+    );
   });
 
   // Login → JWT + catat sesi (untuk revoke saat logout). Dua lapis rate-limit:
@@ -45,7 +31,7 @@ export function register(router) {
     const admin = get("SELECT * FROM admins WHERE email = ?", b.email);
     // Pesan seragam agar tak membocorkan email mana yang terdaftar.
     if (!admin || !verifyPassword(b.password, admin.password_hash)) {
-      throw new ApiError(401, "Email atau password salah", "BAD_CREDENTIALS");
+      throw new ApiError(401, "Wrong email or password", "BAD_CREDENTIALS");
     }
     const { token, jti, exp, expSec } = signJWT(
       { sub: admin.id, cid: admin.company_id, role: admin.role }, TOKEN_TTL,
