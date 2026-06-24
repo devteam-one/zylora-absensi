@@ -58,10 +58,16 @@ jobs:
         run: |
           npm install --no-audit --no-fund --legacy-peer-deps
           npm install --no-audit --no-fund react@18.3.1 react-dom@18.3.1
-          printf 'VITE_API_URL=%s\n' "$API_URL" > .env.production.local
+          # versionCode monoton (epoch detik) DI-BAKE ke build → banner OTA in-app
+          # akurat (app bandingkan VITE_VERSION_CODE vs manifest /downloads/version.json).
+          VC=$(date +%s)
+          printf 'VITE_API_URL=%s\nVITE_VERSION_CODE=%s\n' "$API_URL" "$VC" > .env.production.local
           # Wajibkan API URL: APK yang menunjuk loopback tak berguna di perangkat.
-          VITE_API_URL="$API_URL" VITE_REQUIRE_API_URL=1 VITE_ROLE="$ROLE" \
+          VITE_VERSION_CODE="$VC" VITE_API_URL="$API_URL" VITE_REQUIRE_API_URL=1 VITE_ROLE="$ROLE" \
             npx vite build --outDir "dist-$ROLE" --emptyOutDir
+          # Sidecar agar publisher bisa set versionCode manifest = persis nilai yang di-bake.
+          echo "$VC" > "dist-$ROLE/version-code.txt"
+          cp "dist-$ROLE/version-code.txt" "android-app/version-code-$ROLE.txt" 2>/dev/null || true
 
       - name: Wrap with Capacitor
         working-directory: android-app
@@ -115,6 +121,7 @@ jobs:
           path: |
             android-app/android/app/build/outputs/apk/release/*.apk
             android-app/android/app/build/outputs/bundle/release/*.aab
+            android-app/version-code-${{ env.ROLE }}.txt
           if-no-files-found: error
 
 # Catatan: build assembleRelease. RELEASE-signed bila secret keystore di-set
