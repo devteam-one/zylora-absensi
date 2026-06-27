@@ -45,9 +45,11 @@ function swVersionStamp() {
 }
 
 // Cegah build produksi (APK/desktop/web) tanpa VITE_API_URL: tanpa itu api.ts
-// jatuh ke default loopback http://127.0.0.2:5181 yang TIDAK bisa dihubungi dari
-// perangkat lain — APK rilis akan tampak "tak berubah"/kosong. Default: peringatan
-// keras. Set VITE_REQUIRE_API_URL=1 (mis. di CI wrap) untuk menggagalkan build.
+// jatuh ke default backend PRODUKSI (fallback hardcoded di src/app/api.ts) — bundel
+// diam-diam menunjuk server produksi & APK rilis bisa tampak "tak berubah"/kosong.
+// Default kini FAIL-CLOSED (build gagal). Untuk build lokal yang SENGAJA memakai
+// fallback, set VITE_ALLOW_NO_API_URL=1 (peringatan saja). VITE_REQUIRE_API_URL lama
+// tetap dihormati (kini redundan karena default sudah gagal).
 function apiUrlGuard() {
   return {
     name: 'zylora-api-url-guard',
@@ -63,10 +65,13 @@ function apiUrlGuard() {
         '     Untuk rilis: VITE_API_URL=https://api-anda <perintah build>.',
         '',
       ].join('\n')
-      if (process.env.VITE_REQUIRE_API_URL) {
-        this.error('VITE_API_URL wajib di-set (VITE_REQUIRE_API_URL aktif).')
+      // Escape hatch eksplisit untuk build lokal yang sadar memakai fallback.
+      if (process.env.VITE_ALLOW_NO_API_URL) {
+        console.warn('\x1b[33m%s\x1b[0m', banner)
+        return
       }
       console.warn('\x1b[33m%s\x1b[0m', banner)
+      this.error('VITE_API_URL wajib di-set (build fail-closed). Set VITE_API_URL=<url>, atau VITE_ALLOW_NO_API_URL=1 untuk build lokal yang sengaja memakai fallback.')
     },
   }
 }

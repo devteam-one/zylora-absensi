@@ -26,6 +26,23 @@ function allowOriginFor(req) {
   return origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0] || "*";
 }
 
+// IP klien untuk rate-limit & audit. Di belakang reverse-proxy (nginx → app),
+// req.socket.remoteAddress SELALU 127.0.0.1, jadi bucket per-IP runtuh jadi satu
+// counter global & audit_logs.ip tak berguna. Bila ZYLORA_TRUST_PROXY di-set, ambil
+// hop TERAKHIR dari X-Forwarded-For (IP nyata yang ditambahkan nginx; entri lebih kiri
+// bisa dipalsukan klien → JANGAN dipercaya). Default (tanpa proxy): abaikan header
+// (tak bisa dispoof). Asumsi: tepat SATU proxy tepercaya di depan.
+function clientIp(req) {
+  if (process.env.ZYLORA_TRUST_PROXY) {
+    const xff = req.headers?.["x-forwarded-for"];
+    if (xff) {
+      const parts = String(xff).split(",").map((s) => s.trim()).filter(Boolean);
+      if (parts.length) return parts[parts.length - 1];
+    }
+  }
+  return req.socket?.remoteAddress || "";
+}
+
 // ─── Helper respons ──────────────────────────────────────────────────────────
 export function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -129,7 +146,7 @@ export function Router() {
       query,
       body: {},
       auth: null, // diisi middleware auth
-      ip: req.socket?.remoteAddress || "",
+      ip: clientIp(req), // sadar-proxy bila ZYLORA_TRUST_PROXY di-set
     };
 
     try {

@@ -2062,14 +2062,20 @@ function PayrollTab({ token }: { token: string }) {
   const runPg = usePagination(runs);
   // Cetak slip → jendela baru ber-styling → dialog print/PDF browser.
   const printSlip = (s: Payslip) => {
+    // Escape SEMUA nilai dari server/CSV sebelum di-inject ke jendela cetak. window.open("")
+    // menghasilkan dokumen about:blank yang SAMA-ORIGIN dengan app; markup yang ditulis via
+    // document.write akan DIEKSEKUSI, jadi nama/catatan berisi "<img src=x onerror=...>" bisa
+    // membaca token admin di localStorage. Escape menutup vektor pencurian sesi ini.
+    const esc = (v: any) => String(v ?? "").replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
     const lines = (s.detail?.lines || []).map((l: any) =>
-      `<tr><td>${l.name}${l.note ? `<div class="muted">${l.note}</div>` : ""}</td><td class="r" style="color:${l.type === "earning" ? "#0a7d4a" : "#c0392b"}">${l.type === "earning" ? "+" : "−"}${fmtMoney(l.amount, baseCur)}</td></tr>`).join("");
-    const metrics = s.detail ? Object.entries(s.detail.metrics).map(([k, v]) => `<tr><td>${METRIC_LABEL[k] || k}</td><td class="r">${fmtMetricVal(k, v)}</td></tr>`).join("") : "";
+      `<tr><td>${esc(l.name)}${l.note ? `<div class="muted">${esc(l.note)}</div>` : ""}</td><td class="r" style="color:${l.type === "earning" ? "#0a7d4a" : "#c0392b"}">${l.type === "earning" ? "+" : "−"}${fmtMoney(l.amount, baseCur)}</td></tr>`).join("");
+    const metrics = s.detail ? Object.entries(s.detail.metrics).map(([k, v]) => `<tr><td>${esc(METRIC_LABEL[k] || k)}</td><td class="r">${fmtMetricVal(k, v)}</td></tr>`).join("") : "";
     const w = window.open("", "_blank", "width=520,height=720");
     if (!w) { setErr("Browser blocked the popup — allow popups to print the slip."); return; }
-    w.document.write(`<!doctype html><html lang="id"><head><meta charset="utf-8"><title>Payslip ${s.name} ${s.period}</title>
+    w.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Payslip ${esc(s.name)} ${esc(s.period)}</title>
 <style>body{font-family:system-ui,Arial,sans-serif;color:#1B3D72;margin:32px;font-size:13px}h1{font-size:18px;margin:0}.sub{color:#667;font-size:12px;margin:2px 0 16px}table{width:100%;border-collapse:collapse;margin:8px 0}td{padding:5px 0;border-bottom:1px solid #eee}.r{text-align:right;font-variant-numeric:tabular-nums}.tot{font-weight:700;border-top:2px solid #1B3D72;font-size:15px}.sec{font-weight:700;margin-top:14px;color:#0D1B2A}.muted{color:#889;font-size:11px}@media print{body{margin:12mm}}</style></head>
-<body><h1>Payslip</h1><div class="sub">${s.name} · Period ${s.period} · Currency ${baseCur}</div>
+<body><h1>Payslip</h1><div class="sub">${esc(s.name)} · Period ${esc(s.period)} · Currency ${esc(baseCur)}</div>
 ${metrics ? `<div class="sec">Attendance Metrics</div><table>${metrics}</table>` : ""}
 <div class="sec">Breakdown</div><table><tr><td>Base Salary</td><td class="r">${fmtMoney(s.base_salary, baseCur)}</td></tr>${lines}
 <tr class="tot"><td>Net Pay</td><td class="r">${fmtMoney(s.net, baseCur)}</td></tr></table>
