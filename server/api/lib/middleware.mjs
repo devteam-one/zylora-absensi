@@ -17,10 +17,28 @@ export function requireAuth(ctx) {
   const payload = verifyJWT(token);
   if (!payload) throw new ApiError(401, "Invalid or expired token", "BAD_TOKEN");
 
-  const session = get("SELECT revoked FROM sessions WHERE jti = ?", payload.jti);
+  const session = get(
+    "SELECT subject_type, subject_id, company_id, revoked FROM sessions WHERE jti = ?",
+    payload.jti,
+  );
   if (!session || session.revoked) throw new ApiError(401, "Session has ended", "SESSION_REVOKED");
 
-  const role = payload.role || "control";
+  // Peran HARUS eksplisit & dikenal — jangan fail-open ke peran berhak (dulu `|| "control"`).
+  const role = payload.role;
+  if (role !== "control" && role !== "employee") throw new ApiError(401, "Invalid token role", "BAD_TOKEN");
+
+  // Ikat klaim token ke baris sesi yang dicatat saat login. Baris sesi sebelumnya
+  // hanya dipakai sebagai penanda "hidup" (revoked); identitas/peran diambil mentah
+  // dari JWT — sehingga siapa pun yang bisa menandatangani JWT (mis. ZYLORA_SECRET bocor)
+  // dapat memakai ulang jti hidup miliknya dengan role/cid berbeda → eskalasi lintas-tenant.
+  const expectedType = role === "employee" ? "employee" : "control";
+  if (
+    session.subject_type !== expectedType ||
+    session.subject_id !== payload.sub ||
+    (session.company_id ?? null) !== (payload.cid ?? null)
+  ) {
+    throw new ApiError(401, "Session identity mismatch", "SESSION_MISMATCH");
+  }
   ctx.auth = {
     subjectId: payload.sub,
     subjectType: role === "employee" ? "employee" : "control",

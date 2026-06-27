@@ -22,7 +22,8 @@ desktop-app/www/
 desktop-app/dist-installers/
 android-app/www/
 android-app/android/
-android-app/package-lock.json
+# CATATAN: package-lock.json TIDAK lagi diabaikan — harus ter-commit agar CI
+# `npm ci` reproducible (build APK/desktop ber-tanda-tangan). Lihat docs/AUDIT-2026-06-28.md.
 
 # IDE
 .idea/

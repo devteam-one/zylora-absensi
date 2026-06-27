@@ -17,6 +17,12 @@ on:
 env:
   API_URL: ${{ github.event.inputs.api_url || 'https://api.13-218-74-178.sslip.io' }}
 
+# Hak token minimal (hanya baca repo). Job ini memegang secret code-signing + menjalankan
+# electron-builder (tooling pihak ketiga); batasi token agar dependency yang terkompromi
+# tak bisa menulis ke repo. Naikkan per-job hanya bila benar-benar perlu.
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -39,6 +45,10 @@ jobs:
           # Kode versi monoton untuk cek update OTA (sejajar dgn APK).
           VITE_VERSION_CODE: ${{ github.run_number }}
         run: |
+          # Root = proyek pnpm (pnpm-lock.yaml ter-commit). Untuk build root yang BENAR-BENAR
+          # reproducible, ganti dua baris di bawah dengan `corepack enable && pnpm install
+          # --frozen-lockfile` (react/react-dom adalah dependency langsung di lock → ikut ter-
+          # install). Belum diubah di sini karena perlu diuji di CI dulu. Lihat docs/AUDIT-2026-06-28.md.
           npm install --no-audit --no-fund --legacy-peer-deps
           npm install --no-audit --no-fund react@18.3.1 react-dom@18.3.1
           printf 'VITE_API_URL=%s\nVITE_VERSION_CODE=%s\n' "$API_URL" "$VITE_VERSION_CODE" > .env.production.local
@@ -57,7 +67,10 @@ jobs:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
-          npm install --no-audit --no-fund
+          # Reproducible: butuh desktop-app/package-lock.json TER-COMMIT. Generate sekali
+          # di mesin ber-network: (cd desktop-app && npm install) lalu commit lock-nya.
+          # electron/electron-builder sudah dipin exact di desktop-app/package.json. Lihat docs/AUDIT-2026-06-28.md.
+          npm ci --no-audit --no-fund
           npx electron-builder --publish never
 
       - name: Upload installer

@@ -27,7 +27,15 @@ VITE_ROLE=employee npx vite build --outDir dist-employee --emptyOutDir
 echo "→ Build SISTEM KONTROL → dist-control/  (API: $API_URL)"
 VITE_ROLE=control npx vite build --outDir dist-control --emptyOutDir
 
+# Display kiosk MULTI-TENANT: harus tahu lokasi/perusahaan yang ditampilkannya
+# (endpoint /api/public/location kini menolak tanpa scope). Set VITE_LOCATION_ID
+# (disarankan) ATAU VITE_COMPANY_ID untuk deployment ini; tanpa itu kiosk hanya
+# menampilkan "Display not configured".
+if [ -z "${VITE_LOCATION_ID:-}${VITE_COMPANY_ID:-}" ]; then
+  echo "⚠️  VITE_LOCATION_ID/VITE_COMPANY_ID belum di-set → build display TIDAK terkonfigurasi (kiosk menampilkan 'Display not configured'). Set salah satunya untuk kiosk fungsional."
+fi
 echo "→ Build TAMPILAN BARCODE → dist-display/  (API: $API_URL)"
-VITE_ROLE=display npx vite build --outDir dist-display --emptyOutDir
+VITE_ROLE=display VITE_LOCATION_ID="${VITE_LOCATION_ID:-}" VITE_COMPANY_ID="${VITE_COMPANY_ID:-}" \
+  npx vite build --outDir dist-display --emptyOutDir
 
 echo "✅ Selesai: dist-employee/ , dist-control/ , dist-display/ siap di-host (3 situs statis)."

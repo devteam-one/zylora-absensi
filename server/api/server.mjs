@@ -28,6 +28,20 @@ const PORT = Number(process.env.ZYLORA_PORT) || 5181;
 // 127.0.0.2: konsisten dengan host dua-port frontend & sync-server.
 const HOST = process.env.ZYLORA_HOST || "127.0.0.2";
 
+// SQLite (db.mjs) adalah SATU-SATUNYA backend. Dukungan Postgres dihapus (adapter
+// db-pg.mjs tak pernah tersambung & akan korup bila dipakai). Bila ZYLORA_DATABASE_URL
+// di-set, operator mungkin mengira data tersimpan di Postgres, padahal app menulis ke
+// SQLite lokal (gitignored) → jebakan durabilitas data senyap. Tolak start agar
+// kekeliruan ini terlihat keras, bukan menelan data diam-diam.
+if (process.env.ZYLORA_DATABASE_URL || process.env.DATABASE_URL) {
+  console.error(
+    "[zylora] FATAL: ZYLORA_DATABASE_URL/DATABASE_URL di-set, tetapi backend Postgres TIDAK didukung " +
+    "(server hanya memakai SQLite via db.mjs). Agar data tidak diam-diam masuk ke SQLite lokal, server menolak start.\n" +
+    "  → Hapus variabel tersebut untuk memakai SQLite.",
+  );
+  process.exit(1);
+}
+
 // Identitas versi (sumber tunggal version.json). Saat deploy disalin ke samping
 // server.mjs; saat dev dibaca dari root repo. Fallback aman bila tak ada.
 const HERE = dirname(fileURLToPath(import.meta.url));

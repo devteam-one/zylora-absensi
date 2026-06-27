@@ -425,14 +425,15 @@ function QRLokasiEmployeeApp() {
     try {
       const r = await api.employeeLogin(loginId.trim(), loginPin.trim());
       setToken(r.token);
-      setMe(await api.me(r.token));
+      const m = await api.me(r.token);
+      setMe(m);
       // "Ingat saya": simpan token + ID agar sesi pulih & ID terisi otomatis.
       // Jika tidak, jangan simpan token (login hanya untuk sesi ini).
       try {
         if (remember) { localStorage.setItem("zylora.employee.token", r.token); localStorage.setItem("zylora.employee.id", loginId.trim()); }
         else { localStorage.removeItem("zylora.employee.token"); localStorage.removeItem("zylora.employee.id"); }
       } catch { /* abaikan */ }
-      try { setLocName((await api.publicLocation()).name); } catch { /* abaikan */ }
+      try { setLocName((await api.publicLocation({ company: m.companyId })).name); } catch { /* abaikan */ }
     } catch (e: any) {
       setLoginErr(e?.message || "Login failed");
     } finally { setBusy(false); }
@@ -496,7 +497,7 @@ function QRLokasiEmployeeApp() {
     try { saved = localStorage.getItem("zylora.employee.token"); } catch { /* abaikan */ }
     if (!saved) return;
     api.me(saved)
-      .then((m) => { setToken(saved); setMe(m); api.publicLocation().then(l => setLocName(l.name)).catch(() => {}); })
+      .then((m) => { setToken(saved); setMe(m); api.publicLocation({ company: m.companyId }).then(l => setLocName(l.name)).catch(() => {}); })
       .catch(() => { try { localStorage.removeItem("zylora.employee.token"); } catch { /* abaikan */ } });
   }, []);
 
@@ -961,8 +962,12 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
     if (!authed || !token) return;
     let alive = true;
     const tick = () => {
-      api.company(token).then(c => alive && setCompanyName(c.name)).catch(() => {});
-      api.publicLocation().then(p => alive && setPubLoc(p)).catch(() => alive && setPubLoc(null));
+      // Pratinjau QR di-scope ke perusahaan admin yang login (multi-tenant).
+      api.company(token).then(c => {
+        if (!alive) return;
+        setCompanyName(c.name);
+        api.publicLocation({ company: c.companyId }).then(p => alive && setPubLoc(p)).catch(() => alive && setPubLoc(null));
+      }).catch(() => {});
     };
     tick();
     const id = setInterval(tick, 5000);
@@ -2500,11 +2505,23 @@ function QRDisplayPage() {
   const REFRESH_S = 4;
   const [tick, setTick] = useState(REFRESH_S);
 
+  // Display kiosk dikonfigurasi per-deployment dengan lokasi/perusahaan yang
+  // ditampilkannya (multi-tenant: endpoint publik menolak tanpa scope).
+  const DISPLAY_LOCATION_ID = (import.meta as any).env?.VITE_LOCATION_ID || "";
+  const DISPLAY_COMPANY_ID = (import.meta as any).env?.VITE_COMPANY_ID || "";
   const load = useCallback(async () => {
-    try { setLoc(await api.publicLocation()); setErr(null); }
-    catch (e: any) { setErr(e?.message || "Failed to load QR"); }
+    if (!DISPLAY_LOCATION_ID && !DISPLAY_COMPANY_ID) {
+      setErr("Display not configured — set VITE_LOCATION_ID (or VITE_COMPANY_ID) at build time.");
+      return;
+    }
+    try {
+      setLoc(await api.publicLocation(
+        DISPLAY_LOCATION_ID ? { location: DISPLAY_LOCATION_ID } : { company: DISPLAY_COMPANY_ID },
+      ));
+      setErr(null);
+    } catch (e: any) { setErr(e?.message || "Failed to load QR"); }
     finally { setTick(REFRESH_S); }
-  }, []);
+  }, [DISPLAY_LOCATION_ID, DISPLAY_COMPANY_ID]);
 
   useEffect(() => {
     load();

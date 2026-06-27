@@ -14,12 +14,10 @@
 | Kode sumber (`cb15fc0`) | ✅ Ter-commit & **push ke `main`** (memicu CI APK/desktop/smoke) |
 | **Backend produksi (EC2)** | ✅ **LIVE di `cb15fc0`** — semua fitur API baru jalan |
 | Frontend produksi (3 sub-domain) | ⚠️ **Masih versi deploy sebelumnya** — perlu rebuild dari `cb15fc0` |
-| Skema Neon Postgres (`absen`) | ✅ 17 tabel dibuat (via `psql`) — lihat `deploy/neon-schema.sql` |
-| Adapter Postgres (`db-pg.mjs`) | ✅ Ditulis (dorman; aktif hanya bila `ZYLORA_DATABASE_URL` di-set) |
-| Migrasi handler → async Postgres | ⛔ **Belum** (rewrite besar; lihat §5) |
-| `node_modules` lokal | ⛔ **Kosong** (rusak saat install Neon) → perlu `pnpm install` di terminal |
+| Dukungan Postgres/Neon | 🗑️ **Dihapus** (2026-06-28) — adapter `db-pg.mjs` tak pernah tersambung & akan korup bila dipakai; SQLite kini satu-satunya backend. Lihat §5. |
+| `node_modules` lokal | ⛔ **Kosong** → perlu `pnpm install` di terminal |
 
-**Inti:** backend sudah penuh; tinggal **rebuild+deploy frontend** dan **(opsional) migrasi Postgres**.
+**Inti:** backend sudah penuh; tinggal **rebuild+deploy frontend**. (Backend = SQLite zero-dependency.)
 
 ---
 
@@ -97,54 +95,33 @@ done
 
 ---
 
-## 5. TERTUNDA — Migrasi backend ke Neon Postgres (opsional, besar)
+## 5. Dukungan Postgres/Neon — DIHAPUS (2026-06-28)
 
-### Sudah disiapkan
-- **Skema** ada di Neon DB **`absen`** (17 tabel) — `deploy/neon-schema.sql`.
-  Reserved word di-quote: `shifts."end"`, `location_codes."interval"`. `REAL`→`double precision`.
-- **Adapter** `server/api/lib/db-pg.mjs`: antarmuka `get/all/run/tx` **async**,
-  konversi placeholder `?`→`$n`, transaksi atomik via `AsyncLocalStorage`.
-  Dipakai bila env **`ZYLORA_DATABASE_URL`** di-set; selain itu tetap SQLite (`db.mjs`).
+Jalur Postgres dibuang karena **tidak pernah aktif** dan menyimpan jebakan: adapter
+`server/api/lib/db-pg.mjs` tak pernah disambungkan ke router (semua modul meng-`import`
+`db.mjs`/SQLite), antarmukanya **async** padahal seluruh callsite memakai hasilnya
+secara sinkron, dan SQL-nya memuat kolom reserved tak ter-quote (`end`/`interval`) yang
+ditolak Postgres. Akibatnya `ZYLORA_DATABASE_URL` **tidak berefek** — operator bisa
+mengira data masuk ke Neon padahal app tetap menulis ke SQLite lokal (gitignored).
 
-### Yang masih harus dikerjakan (rewrite besar)
-1. **Buat switch** di `server/api/lib/db.mjs` (atau modul `db/index.mjs`) yang
-   memilih `db-pg.mjs` vs SQLite berdasar `ZYLORA_DATABASE_URL`. Re-export
-   `get/all/run/tx` (+ `cleanupExpired`, `tx`).
-2. **Konversi SEMUA handler & lib ke `async/await`** pada setiap pemanggilan
-   `get/all/run/tx`:
-   - `routes/*.routes.mjs` (auth, company, employees, locations, config,
-     attendance, public, employee, payroll) — jadikan handler `async`, `await`
-     setiap query. Router (`http.mjs`) sudah `await fn(ctx)`, jadi aman.
-   - `lib/attendance-core.mjs`, `lib/payroll-core.mjs`, `lib/middleware.mjs`
-     (`requireAuth`/`audit`), `server.mjs` (`housekeeping`).
-   - **`tx(fn)`**: callback jadi `async` & **`await` tiap query** di dalamnya
-     (callsite: register perusahaan+admin, run payroll).
-   - Catatan: `await` pada nilai sinkron (SQLite) tetap aman → **dual-mode**.
-3. **Driver di deploy**: backend Postgres butuh `@neondatabase/serverless`
-   (sudah dicatat di `package.json`). Deploy SQLite saat ini **tidak** `npm install`;
-   untuk mode Postgres, tambahkan `npm i` di `deploy/setup-remote.sh` + set
-   `ZYLORA_DATABASE_URL` di `/etc/zylora.env`.
-4. **Uji**: jalankan smoke test (`server/api/test/`) terhadap Postgres
-   (`ZYLORA_DATABASE_URL=...absen...`). Tidak bisa diuji di sandbox tool (driver
-   443 diblokir) → uji di terminal Anda / saat deploy EC2.
-5. **Migrasi data** (bila perlu): data SQLite produksi kecil/awal-bersih. Bila ada
-   data, ekspor per-tabel → `COPY`/INSERT ke Postgres. Produksi mulai bersih → bisa
-   diabaikan.
+Yang dilakukan:
+- **Dihapus**: `server/api/lib/db-pg.mjs`, `deploy/neon-schema.sql`.
+- **Guard**: `server.mjs` kini **menolak start** bila `ZYLORA_DATABASE_URL`/`DATABASE_URL`
+  di-set (mengubah jebakan senyap → kegagalan keras). SQLite adalah satu-satunya backend.
+- Dependensi `@neondatabase/serverless` di `package.json` kini **tak terpakai** dan bisa
+  dihapus saat lockfile di-regenerasi berikutnya.
 
-### Koneksi (untuk env, BUKAN ditulis ke repo)
-- Database app: **`absen`** (bukan `neondb`/`Neon Auth`).
-- Bentuk: `postgresql://<user>:<password>@ep-red-wildflower-ai42o4rl-pooler.c-4.us-east-1.aws.neon.tech/absen?sslmode=require`
-- `psql` ke host ini **jalan** (port 5432); driver serverless Node butuh 443
-  (jalan di EC2/terminal Anda, diblokir di sandbox tool).
+Bila kelak skala menuntut Postgres, mulai dari nol dengan abstraksi DB async sejati
+(semua handler/`tx` di-`await`) — bukan menghidupkan adapter lama ini.
 
 ---
 
 ## 6. Keamanan — WAJIB
 
-Kredensial Neon **tampil di chat** (password DB `npg_…` & API key `napi_…`).
-**Rotasi keduanya** di dashboard Neon, lalu perbarui `ZYLORA_DATABASE_URL`
-(saat mode Postgres dipakai). Jangan commit nilai rahasia ke repo —
-gunakan env (`/etc/zylora.env`, `.env` lokal yang gitignored).
+Kredensial Neon pernah **tampil di chat** (password DB `npg_…` & API key `napi_…`).
+Meski dukungan Postgres sudah dihapus (§5), **tetap rotasi/nonaktifkan keduanya** di
+dashboard Neon — kredensial yang pernah bocor harus dianggap terkompromi. Jangan commit
+nilai rahasia ke repo — gunakan env (`/etc/zylora.env`, `.env` lokal yang gitignored).
 
 ---
 
@@ -154,5 +131,4 @@ gunakan env (`/etc/zylora.env`, `.env` lokal yang gitignored).
 - Deploy backend: `deploy/deploy.sh` (override `ZYLORA_SSH_KEY`,
   `ZYLORA_EC2_HOST=13.218.74.178`, `ZYLORA_SECRET=<pakai ulang dari /etc/zylora.env>`).
 - Smoke test: `pnpm test:api` (atau `node --test server/api/test/*.mjs`).
-- Skema Postgres: `deploy/neon-schema.sql`. Adapter: `server/api/lib/db-pg.mjs`.
 - Versi/identitas: `version.json` (root). Backend baca `/api/version`.

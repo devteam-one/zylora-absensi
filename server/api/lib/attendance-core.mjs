@@ -103,10 +103,17 @@ export function resolveLocation(token) {
 }
 
 // Validasi posisi terhadap radius lokasi (dilewati bila lokasi tak punya koordinat).
+// PENTING: koordinat di-coerce & divalidasi finite + dalam rentang dulu. Tanpa ini,
+// nilai non-numerik (mis. "spoof") membuat distanceM => NaN dan `NaN > radius` === false
+// → geofence ter-bypass (check-in palsu dari mana saja).
 export function checkGeo(loc, lat, lng) {
   if (loc.lat == null || loc.lng == null) return;
-  assert(lat != null && lng != null, 400, "GPS coordinates are required", "NO_GPS");
-  const dist = distanceM(loc.lat, loc.lng, lat, lng);
+  const la = Number(lat), ln = Number(lng);
+  assert(
+    Number.isFinite(la) && Number.isFinite(ln) && la >= -90 && la <= 90 && ln >= -180 && ln <= 180,
+    400, "Valid GPS coordinates are required", "NO_GPS",
+  );
+  const dist = distanceM(loc.lat, loc.lng, la, ln);
   if (dist > loc.radius_m) {
     throw new ApiError(403, `Outside location radius (${Math.round(dist)}m > ${loc.radius_m}m)`, "OUT_OF_RANGE");
   }
@@ -133,6 +140,10 @@ export function bumpCodeSerial(locationId) {
 
 // Catat check-in untuk satu karyawan (emp = baris penuh). Melempar 409 bila sudah.
 export function recordCheckin(emp, loc, { lat, lng, method } = {}) {
+  // Cegah check-in lintas-tenant: lokasi harus milik perusahaan karyawan.
+  if (!loc || loc.company_id !== emp.company_id) {
+    throw new ApiError(403, "Location belongs to a different company", "WRONG_COMPANY");
+  }
   const tz = companyTz(emp.company_id);
   const date = todayStrTz(tz);
 
@@ -168,6 +179,10 @@ export function recordCheckin(emp, loc, { lat, lng, method } = {}) {
 
 // Catat check-out. Melempar 409 bila belum check-in hari ini.
 export function recordCheckout(emp, loc) {
+  // Cegah check-out lintas-tenant (selaras dengan check-in).
+  if (!loc || loc.company_id !== emp.company_id) {
+    throw new ApiError(403, "Location belongs to a different company", "WRONG_COMPANY");
+  }
   const tz = companyTz(emp.company_id);
   const date = todayStrTz(tz);
   const rec = get("SELECT * FROM attendance WHERE employee_id = ? AND date = ?", emp.id, date);

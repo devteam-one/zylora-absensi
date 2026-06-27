@@ -59,7 +59,7 @@ export function register(router) {
     const emp = meEmployee(ctx);
     const code = get("SELECT code, image_url FROM employee_codes WHERE employee_id = ?", emp.id);
     json(ctx.res, 200, {
-      employeeId: emp.id, name: emp.name, position: emp.position, department: emp.department,
+      employeeId: emp.id, companyId: emp.company_id, name: emp.name, position: emp.position, department: emp.department,
       email: emp.email || null, start_date: emp.start_date || null,
       schedule: { in: emp.schedule_in, out: emp.schedule_out },
       code: code?.code || null, codeImageUrl: code?.image_url || null,

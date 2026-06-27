@@ -11,8 +11,12 @@ const toMin = (hhmm) => {
   const [h, m] = hhmm.split(":").map(Number);
   return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
 };
-const daysInMonth = (period) => { const [y, mo] = period.split("-").map(Number); return new Date(y, mo, 0).getDate(); };
-const nextDay = (ds) => { const dt = new Date(ds + "T00:00:00"); dt.setDate(dt.getDate() + 1); return dt.toISOString().slice(0, 10); };
+// Date math WAJIB UTC-safe: `new Date("YYYY-MM-DDT00:00:00")` di-parse sebagai waktu
+// LOKAL, lalu .toISOString() balik ke UTC — di host TZ offset-positif (mis. Asia/Jakarta,
+// UTC+7) +1 hari ter-batalkan sehingga nextDay() tak pernah maju → loop tak terhingga.
+// Anchor "Z" + getUTCDate/setUTCDate membuat hasil tak bergantung TZ host.
+const daysInMonth = (period) => { const [y, mo] = period.split("-").map(Number); return new Date(Date.UTC(y, mo, 0)).getUTCDate(); };
+const nextDay = (ds) => { const dt = new Date(ds + "T00:00:00Z"); dt.setUTCDate(dt.getUTCDate() + 1); return dt.toISOString().slice(0, 10); };
 
 // Metrik absensi karyawan untuk satu periode.
 export function computeMetrics(emp, period) {
@@ -61,7 +65,7 @@ export function computeMetrics(emp, period) {
     const ds = `${period}-${String(day).padStart(2, "0")}`;
     if (ds > today) break;
     if (joinDate && ds < joinDate) continue; // sebelum karyawan masuk → bukan alpa
-    const wd = new Date(`${ds}T00:00:00`).getDay(); // 0=Min .. 6=Sab
+    const wd = new Date(`${ds}T00:00:00Z`).getUTCDay(); // 0=Min .. 6=Sab (UTC-safe)
     if (wd === 0 || wd === 6) continue;
     if (datesWithCheckin.has(ds) || leaveDates.has(ds)) continue;
     absent_days++;

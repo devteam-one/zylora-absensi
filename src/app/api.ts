@@ -28,7 +28,7 @@ export type ApiPublicLocation = {
 };
 
 export type ApiMe = {
-  employeeId: string; name: string; position: string; department: string;
+  employeeId: string; companyId: string; name: string; position: string; department: string;
   email: string | null; start_date: string | null;
   schedule: { in: string; out: string };
   code: string | null; codeImageUrl: string | null;
@@ -268,6 +268,14 @@ export const api = {
     req<{ requestId: string; status: string }>("/api/me/leave", { method: "POST", token, body }),
   mePayslips: (token: string) => req<ApiMePayslip[]>("/api/me/payslips", { token }),
 
-  // Publik (kiosk / app karyawan)
-  publicLocation: () => req<ApiPublicLocation>("/api/public/location"),
+  // Publik (kiosk / app karyawan). MULTI-TENANT: WAJIB di-scope ke lokasi/perusahaan
+  // (backend menolak tanpa scope). Display kiosk mengirim VITE_LOCATION_ID/COMPANY_ID;
+  // app karyawan & panel kontrol mengirim companyId miliknya.
+  publicLocation: (params?: { location?: string; company?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.location) q.set("location", params.location);
+    if (params?.company) q.set("company", params.company);
+    const qs = q.toString();
+    return req<ApiPublicLocation>(`/api/public/location${qs ? `?${qs}` : ""}`);
+  },
 };

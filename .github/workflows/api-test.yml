@@ -14,6 +14,10 @@ on:
       - "server/api/**"
       - ".github/workflows/api-test.yml"
 
+# Hak token minimal (hanya baca repo) — pengerasan supply-chain CI.
+permissions:
+  contents: read
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
