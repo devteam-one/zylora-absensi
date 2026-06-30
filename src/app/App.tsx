@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { motion } from "motion/react";
 import {
   QrCode, Users, Clock, CheckCircle2, LogOut, Shield,
@@ -282,6 +282,125 @@ function useConfirm() {
     </AlertDialog>
   );
   return { ask, confirmNode };
+}
+
+// ─── Design system: primitif tampilan bersama (dipakai SEMUA tab kontrol) ─────
+// Restyle in-place berbasis primitif ini → konsistensi global tanpa men-tweak
+// tiap tab terpisah (yang justru sumber inkonsistensi).
+
+// Kartu standar (permukaan konten).
+function Card({ className = "", children }: { className?: string; children: ReactNode }) {
+  return <div className={`bg-card rounded-2xl border border-border ${className}`}>{children}</div>;
+}
+
+// Kartu ber-judul: header (ikon + judul + subjudul + aksi kanan) → konten.
+function SectionCard({ title, subtitle, icon, action, className = "", bodyClassName = "p-4", children }: {
+  title?: ReactNode; subtitle?: ReactNode; icon?: ReactNode; action?: ReactNode;
+  className?: string; bodyClassName?: string; children: ReactNode;
+}) {
+  return (
+    <Card className={`overflow-hidden ${className}`}>
+      {(title || action) && (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border bg-muted/20">
+          <div className="flex items-center gap-2 min-w-0">
+            {icon && <span className="text-primary flex-shrink-0">{icon}</span>}
+            <div className="min-w-0">
+              {title && <p className="font-semibold text-sm truncate">{title}</p>}
+              {subtitle && <p className="text-[11px] text-muted-foreground truncate">{subtitle}</p>}
+            </div>
+          </div>
+          {action && <div className="flex items-center gap-2 flex-shrink-0">{action}</div>}
+        </div>
+      )}
+      <div className={bodyClassName}>{children}</div>
+    </Card>
+  );
+}
+
+// Judul seksi tab + subjudul + aksi (header kecil di atas konten tab).
+function TabIntro({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
+  return (
+    <div className="flex items-end justify-between gap-3 flex-wrap">
+      <div>
+        <h2 className="font-bold text-base leading-tight">{title}</h2>
+        {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
+      </div>
+      {action && <div className="flex items-center gap-2">{action}</div>}
+    </div>
+  );
+}
+
+// Empty-state seragam: ikon + judul + petunjuk + aksi opsional.
+function EmptyState({ icon, title, hint, action }: { icon?: ReactNode; title: string; hint?: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-12 px-4 gap-2">
+      {icon && <div className="w-12 h-12 rounded-2xl bg-muted/60 flex items-center justify-center text-muted-foreground mb-1">{icon}</div>}
+      <p className="font-semibold text-sm">{title}</p>
+      {hint && <p className="text-xs text-muted-foreground max-w-sm">{hint}</p>}
+      {action && <div className="mt-2">{action}</div>}
+    </div>
+  );
+}
+
+// Skeleton baris tabel saat memuat (lebar kolom bervariasi agar natural).
+function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
+  const widths = ["w-1/3", "w-1/5", "w-1/4", "w-1/6", "w-1/4", "w-1/5"];
+  return (
+    <div className="divide-y divide-border">
+      {Array.from({ length: rows }).map((_, r) => (
+        <div key={r} className="flex items-center gap-4 px-4 py-3.5">
+          {Array.from({ length: cols }).map((_, c) => <Skeleton key={c} className={`h-4 ${widths[c % widths.length]}`} />)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Kartu statistik/KPI seragam (dipakai Dashboard, Attendance, History, dll.).
+function StatCard({ label, value, sub, tone = "text-foreground", bg = "bg-card border-border", icon }: {
+  label: string; value: ReactNode; sub?: string; tone?: string; bg?: string; icon?: ReactNode;
+}) {
+  return (
+    <div className={`rounded-2xl border p-3.5 ${bg}`}>
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+        {icon && <span className="text-muted-foreground/70">{icon}</span>}
+      </div>
+      <p className={`text-2xl font-bold tabular-nums mt-0.5 ${tone}`}>{value}</p>
+      <p className="text-[10px] text-muted-foreground h-3 truncate">{sub ?? ""}</p>
+    </div>
+  );
+}
+
+// Tombol-ikon aksi seragam (edit/hapus/dll) — area klik & hover konsisten.
+function IconButton({ icon, title, onClick, tone = "hover:text-primary", disabled = false }: {
+  icon: ReactNode; title: string; onClick: () => void; tone?: string; disabled?: boolean;
+}) {
+  return (
+    <button type="button" title={title} aria-label={title} disabled={disabled} onClick={onClick}
+      className={`p-1.5 rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 disabled:opacity-40 ${tone}`}>
+      {icon}
+    </button>
+  );
+}
+
+// Kelas tombol seragam (primary/secondary/danger) — dipakai lewat className.
+const btnPrimary = "inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors";
+const btnGhost = "inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-border text-sm font-semibold hover:bg-muted/40 disabled:opacity-40 transition-colors";
+const fieldInput = "px-3 py-2 rounded-xl border border-border text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/30";
+
+// Banner pesan seragam (error merah / info hijau-biru).
+function ErrorBanner({ children }: { children: ReactNode }) {
+  return <div className="flex items-center gap-2 p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{children}</div>;
+}
+function InfoBanner({ children, tone = "emerald" }: { children: ReactNode; tone?: "emerald" | "blue" }) {
+  const c = tone === "blue" ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-emerald-50 border-emerald-200 text-emerald-700";
+  return <div className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs ${c}`}><CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />{children}</div>;
+}
+
+// Field berlabel (label uppercase kecil di atas kontrol).
+function Field({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
+  return <div className={`flex flex-col ${className}`}><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">{label}</label>{children}</div>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1083,13 +1202,9 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden bg-background">
-        <div className="bg-card border-b border-border px-5 py-3 flex items-center justify-between flex-shrink-0">
-          <div>
-            <h1 className="font-bold text-sm">
-              {({ dashboard: "Dashboard", qr_display: "Location Attendance QR", kehadiran: "Attendance Summary", izin_cuti: "Leave Management", karyawan: "Manage Employees", lokasi: "Locations & QR", shift: "Work Shifts", perangkat: "Registered Devices", riwayat: "Attendance History", penggajian: "Payroll", kurs: "Exchange Rates", pengaturan: "Company Settings", log: "Audit Log" } as Record<string, string>)[tab]}
-            </h1>
-            <p className="text-xs text-muted-foreground">{fmtDate(now)}</p>
-          </div>
+        <div className="bg-card border-b border-border px-5 py-2.5 flex items-center justify-between flex-shrink-0">
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" />{fmtDate(now)}</p>
+          <span className="text-[11px] text-muted-foreground font-mono tabular-nums flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" />{fmtTime(now)}</span>
         </div>
 
         <div className="flex-1 overflow-auto p-4 space-y-4">
@@ -1101,7 +1216,9 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
 
           {/* QR Display Tab */}
           {tab === "qr_display" && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="space-y-4">
+              <TabIntro title="Location Attendance QR" subtitle="Configure & preview the entrance QR employees scan to check in" />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Settings */}
               <div className="bg-card rounded-xl border border-border p-5 space-y-4">
                 <p className="font-semibold text-sm">Location QR Settings</p>
@@ -1188,6 +1305,7 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
                 </div>
               </div>
             </div>
+            </div>
           )}
 
           {/* Attendance Tab */}
@@ -1197,9 +1315,10 @@ function QRLokasiControlPanel({ attendance, leaveRequests, onApproveLeave, onRej
 
           {/* Leave Tab */}
           {tab === "izin_cuti" && (
-            <div className="space-y-3">
+            <div className="space-y-4">
+              <TabIntro title="Leave Management" subtitle="Review, approve, reject or remove employee leave & permission requests" />
               {leaveRequests.length === 0 && (
-                <p className="text-center text-muted-foreground text-sm py-8">No leave requests yet.</p>
+                <Card><EmptyState icon={<FileText className="w-5 h-5" />} title="No leave requests" hint="Pending & processed leave/permission requests from employees appear here." /></Card>
               )}
               {leavePg.pageItems.map(req => {
                 const emp = empName(req.employeeId);
@@ -1366,117 +1485,98 @@ function EmployeeManagerTab({ employees, onCreate, onUpdate, onDelete, onResetCo
   );
 
   if (mode === "form") return (
-    <div className="bg-card rounded-xl border border-border p-5 max-w-2xl space-y-4">
-      <p className="font-semibold text-sm">{editId ? "Edit Employee" : "Add Employee"}</p>
-      {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      <div className="grid grid-cols-2 gap-3">
-        {field("Name", "name", "text", "Full name")}
-        {field("Email", "email", "email", "name@company.com")}
-        {field("Position", "position", "text", "e.g. IT Staff")}
-        {field("Department", "department", "text", "e.g. Information Technology")}
-        {field("Clock-in", "schedule_in", "time")}
-        {field("Clock-out", "schedule_out", "time")}
-      </div>
-      <div>
-        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Base Salary</label>
-        <input type="number" value={form.base_salary ?? 0} placeholder="e.g. 5000000"
-          onChange={e => setForm(f => ({ ...f, base_salary: Number(e.target.value) || 0 }))}
-          className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
-      </div>
-      <div>
-        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Employee Login PIN / Password</label>
-        <input type="text" value={form.password ?? ""} placeholder={editId ? "Leave blank to keep current" : "e.g. 123456 — for the employee app login"}
-          onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-          className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
-        <p className="text-[11px] text-muted-foreground mt-1">{editId ? "Fill in to change the employee's PIN." : "Without a PIN, the employee can't sign in or check attendance."}</p>
-      </div>
-      {editId && (
-        <div>
-          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Status</label>
-          <select value={form.status ?? "active"} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
-            className="w-full px-3 py-2 rounded-lg border border-border text-sm">
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
+    <div className="space-y-4 max-w-2xl">
+      <TabIntro title={editId ? "Edit Employee" : "Add Employee"} subtitle="Identity, schedule, base salary & login PIN" />
+      {err && <ErrorBanner>{err}</ErrorBanner>}
+      <SectionCard title="Employee details" icon={<UserCheck className="w-4 h-4" />} bodyClassName="p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          {field("Name", "name", "text", "Full name")}
+          {field("Email", "email", "email", "name@company.com")}
+          {field("Position", "position", "text", "e.g. IT Staff")}
+          {field("Department", "department", "text", "e.g. Information Technology")}
+          {field("Clock-in", "schedule_in", "time")}
+          {field("Clock-out", "schedule_out", "time")}
         </div>
-      )}
-      <div className="flex gap-2 pt-1">
-        <button disabled={busy} onClick={save} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"><Check className="w-4 h-4" />{busy ? "Saving…" : "Save"}</button>
-        <button disabled={busy} onClick={() => setMode("list")} className="px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40">Cancel</button>
-      </div>
+        <Field label="Base Salary"><input type="number" value={form.base_salary ?? 0} placeholder="e.g. 5000000" onChange={e => setForm(f => ({ ...f, base_salary: Number(e.target.value) || 0 }))} className={fieldInput + " w-full"} /></Field>
+        <Field label="Employee Login PIN / Password">
+          <input type="text" value={form.password ?? ""} placeholder={editId ? "Leave blank to keep current" : "e.g. 123456 — for the employee app login"} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} className={fieldInput + " w-full"} />
+          <p className="text-[11px] text-muted-foreground mt-1">{editId ? "Fill in to change the employee's PIN." : "Without a PIN, the employee can't sign in or check attendance."}</p>
+        </Field>
+        {editId && (
+          <Field label="Status"><select value={form.status ?? "active"} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className={fieldInput + " w-full"}><option value="active">Active</option><option value="inactive">Inactive</option></select></Field>
+        )}
+        <div className="flex gap-2 pt-1">
+          <button disabled={busy} onClick={save} className={btnPrimary}><Check className="w-4 h-4" />{busy ? "Saving…" : "Save"}</button>
+          <button disabled={busy} onClick={() => setMode("list")} className={btnGhost}>Cancel</button>
+        </div>
+      </SectionCard>
     </div>
   );
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{filtered.length} of {employees.length} employees{q || statusFilter !== "all" ? " (filtered)" : ""}</p>
-        <div className="flex items-center gap-2">
+    <div className="space-y-4">
+      <TabIntro title="Manage Employees" subtitle={`${filtered.length} of ${employees.length} employees${q || statusFilter !== "all" ? " (filtered)" : ""}`}
+        action={<>
           <button onClick={downloadTemplate} className="text-xs font-semibold text-primary hover:underline">CSV Template</button>
-          <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40 cursor-pointer">
-            <Download className="w-4 h-4 rotate-180" />Import CSV
-            <input type="file" accept=".csv,text/csv" className="hidden" onChange={e => { handleImport(e.target.files?.[0] || null); e.currentTarget.value = ""; }} />
-          </label>
-          <button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"><UserCheck className="w-4 h-4" />Add Employee</button>
-        </div>
-      </div>
-      {importMsg && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs"><CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />{importMsg}</div>}
+          <label className={btnGhost + " cursor-pointer"}><Download className="w-4 h-4 rotate-180" />Import CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={e => { handleImport(e.target.files?.[0] || null); e.currentTarget.value = ""; }} /></label>
+          <button onClick={openAdd} className={btnPrimary}><UserCheck className="w-4 h-4" />Add Employee</button>
+        </>} />
+      {importMsg && <InfoBanner tone="blue">{importMsg}</InfoBanner>}
+      {err && <ErrorBanner>{err}</ErrorBanner>}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-            placeholder="Search name, ID, position, department, email…"
-            className="w-full pl-9 pr-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            placeholder="Search name, ID, position, department, email…" className={fieldInput + " w-full pl-9"} />
         </div>
-        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as any); setPage(1); }}
-          className="px-3 py-2 rounded-lg border border-border text-sm bg-card">
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as any); setPage(1); }} className={fieldInput}>
           <option value="all">All statuses</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
       </div>
-      {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead><tr className="border-b border-border bg-muted/30">
-            {["Employee", "Department", "Schedule", "Status", "QR / PIN", "Actions"].map(h => (
-              <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
-            ))}
-          </tr></thead>
-          <tbody className="divide-y divide-border">
-            {filtered.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">{employees.length === 0 ? 'No employees yet. Click "Add Employee".' : "No employees match your search/filter."}</td></tr>
-            )}
-            {pageItems.map(e => (
-              <tr key={e.employeeId} className="hover:bg-muted/20 transition-colors">
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <Avatar initials={e.name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase()} size="sm" />
-                    <div>
-                      <p className="font-semibold text-sm">{e.name}</p>
-                      <p className="text-[11px] text-muted-foreground">{e.position || "—"} · <span className="font-mono">{e.employeeId}</span></p>
+      <SectionCard title="Employees" subtitle={`${filtered.length} shown`} bodyClassName="p-0">
+        {filtered.length === 0 ? (
+          <EmptyState icon={<Users className="w-5 h-5" />} title={employees.length === 0 ? "No employees yet" : "No matches"} hint={employees.length === 0 ? 'Click "Add Employee" or import a CSV to get started.' : "No employees match your search/filter."} />
+        ) : (
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-border bg-muted/20">
+              {["Employee", "Department", "Schedule", "Status", "QR / PIN", "Actions"].map(h => (
+                <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
+              ))}
+            </tr></thead>
+            <tbody className="divide-y divide-border">
+              {pageItems.map(e => (
+                <tr key={e.employeeId} className="hover:bg-muted/20 transition-colors">
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Avatar initials={e.name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase()} size="sm" />
+                      <div>
+                        <p className="font-semibold text-sm">{e.name}</p>
+                        <p className="text-[11px] text-muted-foreground">{e.position || "—"} · <span className="font-mono">{e.employeeId}</span></p>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-4 py-2.5"><span className="text-xs">{e.department || "—"}</span></td>
-                <td className="px-4 py-2.5"><span className="font-mono text-xs">{e.schedule.in ?? "—"}–{e.schedule.out ?? "—"}</span></td>
-                <td className="px-4 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${e.status === "active" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-muted text-muted-foreground border-border"}`}>{e.status === "active" ? "Active" : "Inactive"}</span></td>
-                <td className="px-4 py-2.5">
-                  <span className={`text-[11px] block ${e.barcode ? "text-emerald-600" : "text-muted-foreground"}`}>QR {e.barcode ? "✓" : "—"}</span>
-                  <span className={`text-[11px] block ${e.has_pin ? "text-emerald-600" : "text-amber-600"}`}>PIN {e.has_pin ? "✓" : "✗"}</span>
-                </td>
-                <td className="px-4 py-2.5">
-                  <span className="flex items-center gap-2">
-                    <button onClick={() => openEdit(e)} title="Edit" className="text-muted-foreground hover:text-primary"><Pencil className="w-4 h-4" /></button>
-                    <button disabled={busy} onClick={() => ask({ title: "Reset attendance code?", body: `Generate a new QR/barcode for ${e.name}? The old code stops working.`, confirmLabel: "Reset", danger: false, onConfirm: () => doReset(e.employeeId) })} title="Reset code" className="text-muted-foreground hover:text-amber-600"><QrCode className="w-4 h-4" /></button>
-                    <button onClick={() => doDelete(e)} title="Delete" className="text-muted-foreground hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                  </td>
+                  <td className="px-4 py-2.5"><span className="text-xs">{e.department || "—"}</span></td>
+                  <td className="px-4 py-2.5"><span className="font-mono text-xs">{e.schedule.in ?? "—"}–{e.schedule.out ?? "—"}</span></td>
+                  <td className="px-4 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${e.status === "active" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-muted text-muted-foreground border-border"}`}>{e.status === "active" ? "Active" : "Inactive"}</span></td>
+                  <td className="px-4 py-2.5">
+                    <span className={`text-[11px] block ${e.barcode ? "text-emerald-600" : "text-muted-foreground"}`}>QR {e.barcode ? "✓" : "—"}</span>
+                    <span className={`text-[11px] block ${e.has_pin ? "text-emerald-600" : "text-amber-600"}`}>PIN {e.has_pin ? "✓" : "✗"}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-1">
+                      <IconButton icon={<Pencil className="w-4 h-4" />} title="Edit" onClick={() => openEdit(e)} />
+                      <IconButton icon={<QrCode className="w-4 h-4" />} title="Reset code" tone="hover:text-amber-600" disabled={busy} onClick={() => ask({ title: "Reset attendance code?", body: `Generate a new QR/barcode for ${e.name}? The old code stops working.`, confirmLabel: "Reset", danger: false, onConfirm: () => doReset(e.employeeId) })} />
+                      <IconButton icon={<Trash2 className="w-4 h-4" />} title="Delete" tone="hover:text-red-600" onClick={() => doDelete(e)} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </SectionCard>
       <Pagination page={curPage} totalPages={totalPages} total={total} from={from} to={to} onPage={setPage} />
       {confirmNode}
     </div>
@@ -1500,7 +1600,7 @@ function LokasiTab({ token, locations, onCreate, onUpdate, onDelete }: {
   const [err, setErr] = useState("");
   const [qr, setQr] = useState<{ loc: string; url: string; codeId: string; type: "dynamic" | "static" } | null>(null);
   const { ask, confirmNode } = useConfirm();
-  const inputCls = "w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
+  const inputCls = fieldInput + " w-full";
 
   const useMyGps = async () => {
     setErr("");
@@ -1552,45 +1652,48 @@ function LokasiTab({ token, locations, onCreate, onUpdate, onDelete }: {
   };
 
   if (mode === "form") return (
-    <div className="bg-card rounded-xl border border-border p-5 max-w-xl space-y-3">
-      <p className="font-semibold text-sm">{editId ? "Edit Location" : "Add Attendance Location"}</p>
-      {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Location Name</label><input className={inputCls} placeholder="e.g. Head Office" value={form.name ?? ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Address</label><input className={inputCls} placeholder="Location address" value={form.address ?? ""} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-      <div className="grid grid-cols-2 gap-3">
-        <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Latitude</label><input className={inputCls} type="number" step="any" placeholder="-6.2088" value={form.lat ?? ""} onChange={e => setForm(f => ({ ...f, lat: e.target.value === "" ? null : Number(e.target.value) }))} /></div>
-        <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Longitude</label><input className={inputCls} type="number" step="any" placeholder="106.8456" value={form.lng ?? ""} onChange={e => setForm(f => ({ ...f, lng: e.target.value === "" ? null : Number(e.target.value) }))} /></div>
-      </div>
-      <div><label className="text-xs font-semibold text-muted-foreground uppercase block mb-1">Validation radius (meters)</label><input className={inputCls} type="number" placeholder="100" value={form.radius_m ?? 100} onChange={e => setForm(f => ({ ...f, radius_m: Number(e.target.value) }))} /></div>
-      <button onClick={useMyGps} className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"><MapPin className="w-3.5 h-3.5" />Use my GPS coordinates now</button>
-      {form.lat != null && form.lng != null && (
-        <div className="rounded-lg overflow-hidden border border-border">
-          <iframe title="Location map preview" className="w-full h-44 border-0" loading="lazy"
-            src={`https://www.openstreetmap.org/export/embed.html?bbox=${form.lng - 0.004}%2C${form.lat - 0.004}%2C${form.lng + 0.004}%2C${form.lat + 0.004}&layer=mapnik&marker=${form.lat}%2C${form.lng}`} />
-          <div className="flex items-center justify-between px-3 py-2 bg-muted/30 text-[11px]">
-            <span className="text-muted-foreground">Geofence radius: <b className="text-foreground">{form.radius_m || 100} m</b> from this point</span>
-            <a href={`https://www.openstreetmap.org/?mlat=${form.lat}&mlon=${form.lng}#map=18/${form.lat}/${form.lng}`} target="_blank" rel="noreferrer" className="text-primary font-semibold hover:underline">Open map ↗</a>
-          </div>
+    <div className="space-y-4 max-w-xl">
+      <TabIntro title={editId ? "Edit Location" : "Add Attendance Location"} subtitle="GPS coordinates + radius drive the check-in geofence" />
+      {err && <ErrorBanner>{err}</ErrorBanner>}
+      <SectionCard title="Location details" icon={<MapPin className="w-4 h-4" />} bodyClassName="p-5 space-y-3">
+        <Field label="Location Name"><input className={inputCls} placeholder="e.g. Head Office" value={form.name ?? ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
+        <Field label="Address"><input className={inputCls} placeholder="Location address" value={form.address ?? ""} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Latitude"><input className={inputCls} type="number" step="any" placeholder="-6.2088" value={form.lat ?? ""} onChange={e => setForm(f => ({ ...f, lat: e.target.value === "" ? null : Number(e.target.value) }))} /></Field>
+          <Field label="Longitude"><input className={inputCls} type="number" step="any" placeholder="106.8456" value={form.lng ?? ""} onChange={e => setForm(f => ({ ...f, lng: e.target.value === "" ? null : Number(e.target.value) }))} /></Field>
         </div>
-      )}
-      <div className="flex gap-2 pt-1">
-        <button disabled={busy} onClick={save} className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"><Check className="w-4 h-4" />{busy ? "Saving…" : "Save"}</button>
-        <button disabled={busy} onClick={() => setMode("list")} className="px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40">Cancel</button>
-      </div>
+        <Field label="Validation radius (meters)"><input className={inputCls} type="number" placeholder="100" value={form.radius_m ?? 100} onChange={e => setForm(f => ({ ...f, radius_m: Number(e.target.value) }))} /></Field>
+        <button onClick={useMyGps} className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"><MapPin className="w-3.5 h-3.5" />Use my GPS coordinates now</button>
+        {form.lat != null && form.lng != null && (
+          <div className="rounded-xl overflow-hidden border border-border">
+            <iframe title="Location map preview" className="w-full h-44 border-0" loading="lazy"
+              src={`https://www.openstreetmap.org/export/embed.html?bbox=${form.lng - 0.004}%2C${form.lat - 0.004}%2C${form.lng + 0.004}%2C${form.lat + 0.004}&layer=mapnik&marker=${form.lat}%2C${form.lng}`} />
+            <div className="flex items-center justify-between px-3 py-2 bg-muted/30 text-[11px]">
+              <span className="text-muted-foreground">Geofence radius: <b className="text-foreground">{form.radius_m || 100} m</b> from this point</span>
+              <a href={`https://www.openstreetmap.org/?mlat=${form.lat}&mlon=${form.lng}#map=18/${form.lat}/${form.lng}`} target="_blank" rel="noreferrer" className="text-primary font-semibold hover:underline">Open map ↗</a>
+            </div>
+          </div>
+        )}
+        <div className="flex gap-2 pt-1">
+          <button disabled={busy} onClick={save} className={btnPrimary}><Check className="w-4 h-4" />{busy ? "Saving…" : "Save"}</button>
+          <button disabled={busy} onClick={() => setMode("list")} className={btnGhost}>Cancel</button>
+        </div>
+      </SectionCard>
     </div>
   );
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{locations.length} location{locations.length === 1 ? "" : "s"} registered</p>
-        <button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"><MapPin className="w-4 h-4" />Add Location</button>
-      </div>
-      {err && <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      {locations.length === 0 && <p className="text-center text-muted-foreground text-sm py-8">No locations yet. Add an office + its GPS coordinates so radius validation works.</p>}
+    <div className="space-y-4">
+      <TabIntro title="Locations & QR" subtitle={`${locations.length} location${locations.length === 1 ? "" : "s"} registered · generate entrance QR codes`}
+        action={<button onClick={openAdd} className={btnPrimary}><MapPin className="w-4 h-4" />Add Location</button>} />
+      {err && <ErrorBanner>{err}</ErrorBanner>}
+      {locations.length === 0 && (
+        <Card><EmptyState icon={<MapPin className="w-5 h-5" />} title="No locations yet" hint="Add an office and its GPS coordinates so radius (geofence) validation works."
+          action={<button onClick={openAdd} className={btnPrimary}><MapPin className="w-4 h-4" />Add Location</button>} /></Card>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {locations.map(l => (
-          <div key={l.locationId} className="bg-card rounded-xl border border-border p-4">
+          <Card key={l.locationId} className="p-4">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="font-bold text-sm">{l.name}</p>
@@ -1619,7 +1722,7 @@ function LokasiTab({ token, locations, onCreate, onUpdate, onDelete }: {
                 </div>
               </div>
             )}
-          </div>
+          </Card>
         ))}
       </div>
       {confirmNode}
@@ -1646,25 +1749,30 @@ function ShiftTab({ token }: { token: string }) {
     catch (e: any) { setErr(e?.message || "Failed"); } finally { setBusy(false); }
   };
   const del = async (id: string) => { setErr(""); try { await api.deleteShift(token, id); if (editId === id) reset(); reload(); } catch (e: any) { setErr(e?.message || "Failed to delete"); } };
-  const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
-    <div className="space-y-3">
-      {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
-      <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Shift Name</label><input className={inputCls} placeholder="e.g. Morning" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Start</label><input type="time" className={inputCls} value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value }))} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">End</label><input type="time" className={inputCls} value={form.end} onChange={e => setForm(f => ({ ...f, end: e.target.value }))} /></div>
-        <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">{editId ? "Update" : "Add"}</button>
-        {editId && <button onClick={reset} className="px-3 py-2 rounded-lg border border-border text-sm">Cancel</button>}
-      </div>
+    <div className="space-y-4">
+      <TabIntro title="Work Shifts" subtitle="Define shift names and start/end times for scheduling" />
+      {(err || loadErr) && <ErrorBanner>{err || loadErr}</ErrorBanner>}
+      <SectionCard title={editId ? "Edit shift" : "Add shift"} icon={<Timer className="w-4 h-4" />} bodyClassName="p-4 flex flex-wrap items-end gap-2">
+        <Field label="Shift Name"><input className={fieldInput} placeholder="e.g. Morning" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
+        <Field label="Start"><input type="time" className={fieldInput} value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value }))} /></Field>
+        <Field label="End"><input type="time" className={fieldInput} value={form.end} onChange={e => setForm(f => ({ ...f, end: e.target.value }))} /></Field>
+        <button disabled={busy} onClick={save} className={btnPrimary}>{editId ? "Update" : "Add"}</button>
+        {editId && <button onClick={reset} className={btnGhost}>Cancel</button>}
+      </SectionCard>
+      <SectionCard title="Shifts" subtitle={data ? `${items.length} total` : undefined} bodyClassName="p-0">
+        {!data ? <TableSkeleton rows={4} cols={4} /> : items.length === 0 ? (
+          <EmptyState icon={<Timer className="w-5 h-5" />} title="No shifts yet" hint="Add a shift above to use it in scheduling." />
+        ) : (
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-border bg-muted/20">{["Shift", "Start", "End", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+            <tbody className="divide-y divide-border">
+              {pg.pageItems.map(s => <tr key={s.shiftId} className="hover:bg-muted/20 transition-colors"><td className="px-4 py-2.5 font-semibold">{s.name}</td><td className="px-4 py-2.5 font-mono">{s.start}</td><td className="px-4 py-2.5 font-mono">{s.end}</td><td className="px-4 py-2.5"><div className="flex items-center gap-1 justify-end"><IconButton icon={<Pencil className="w-4 h-4" />} title="Edit" onClick={() => { setEditId(s.shiftId); setForm({ name: s.name, start: s.start, end: s.end }); }} /><IconButton icon={<Trash2 className="w-4 h-4" />} title="Delete" tone="hover:text-red-600" onClick={() => ask({ title: "Delete shift?", body: `Remove the "${s.name}" shift?`, onConfirm: () => del(s.shiftId) })} /></div></td></tr>)}
+            </tbody>
+          </table>
+        )}
+      </SectionCard>
       {confirmNode}
-      <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Shift", "Start", "End", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
-          <tbody className="divide-y divide-border">
-            {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground text-sm">No shifts yet.</td></tr>}
-            {pg.pageItems.map(s => <tr key={s.shiftId} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{s.name}</td><td className="px-4 py-2.5 font-mono">{s.start}</td><td className="px-4 py-2.5 font-mono">{s.end}</td><td className="px-4 py-2.5 flex gap-3"><button onClick={() => { setEditId(s.shiftId); setForm({ name: s.name, start: s.start, end: s.end }); }} className="text-primary text-xs hover:underline">Edit</button><button onClick={() => ask({ title: "Delete shift?", body: `Remove the "${s.name}" shift?`, onConfirm: () => del(s.shiftId) })} className="text-red-600 text-xs hover:underline">Delete</button></td></tr>)}
-          </tbody></table>
-      </div>
       <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} />
     </div>
   );
@@ -1696,25 +1804,29 @@ function DeviceTab({ token, employees }: { token: string; employees: ApiEmployee
   };
   const openEdit = (d: { id: string; employeeId: string; deviceId: string; label: string | null }) => { setEditId(d.id); setForm({ employeeId: d.employeeId, deviceId: d.deviceId, label: d.label ?? "" }); setErr(""); };
   const del = async (id: string) => { setErr(""); try { await api.deleteDevice(token, id); reload(); } catch (e: any) { setErr(e?.message || "Failed to delete"); } };
-  const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
-    <div className="space-y-3">
-      {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
-      <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Employee</label>
-          <select disabled={!!editId} className={inputCls + (editId ? " opacity-60" : "")} value={form.employeeId} onChange={e => setForm(f => ({ ...f, employeeId: e.target.value }))}><option value="">Select…</option>{employees.map(e => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}</select></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Device ID</label><input disabled={!!editId} className={inputCls + (editId ? " opacity-60" : "")} placeholder="device id / IMEI" value={form.deviceId} onChange={e => setForm(f => ({ ...f, deviceId: e.target.value }))} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Label</label><input className={inputCls} placeholder="e.g. John's phone" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} /></div>
-        <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">{editId ? "Update" : "Register"}</button>
-        {editId && <button onClick={reset} className="px-3 py-2 rounded-lg border border-border text-sm">Cancel</button>}
-      </div>
-      <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Employee", "Device ID", "Label", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
-          <tbody className="divide-y divide-border">
-            {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground text-sm">No devices registered yet.</td></tr>}
-            {pg.pageItems.map(d => { const e = employees.find(x => x.employeeId === d.employeeId); return <tr key={d.id} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-semibold">{e?.name ?? d.employeeId}</td><td className="px-4 py-2.5 font-mono text-xs">{d.deviceId}</td><td className="px-4 py-2.5">{d.label ?? "—"}</td><td className="px-4 py-2.5 flex gap-3"><button onClick={() => openEdit(d)} className="text-primary text-xs hover:underline">Edit</button><button onClick={() => ask({ title: "Delete device?", body: `Unregister this device${e ? ` for ${e.name}` : ""}? The employee may need to re-register it.`, onConfirm: () => del(d.id) })} className="text-red-600 text-xs hover:underline">Delete</button></td></tr>; })}
-          </tbody></table>
-      </div>
+    <div className="space-y-4">
+      <TabIntro title="Registered Devices" subtitle="Bind employees to their device for tamper-resistant check-in" />
+      {(err || loadErr) && <ErrorBanner>{err || loadErr}</ErrorBanner>}
+      <SectionCard title={editId ? "Edit device" : "Register device"} icon={<Smartphone className="w-4 h-4" />} bodyClassName="p-4 flex flex-wrap items-end gap-2">
+        <Field label="Employee"><select disabled={!!editId} className={fieldInput + (editId ? " opacity-60" : "")} value={form.employeeId} onChange={e => setForm(f => ({ ...f, employeeId: e.target.value }))}><option value="">Select…</option>{employees.map(e => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}</select></Field>
+        <Field label="Device ID"><input disabled={!!editId} className={fieldInput + (editId ? " opacity-60" : "")} placeholder="device id / IMEI" value={form.deviceId} onChange={e => setForm(f => ({ ...f, deviceId: e.target.value }))} /></Field>
+        <Field label="Label"><input className={fieldInput} placeholder="e.g. John's phone" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} /></Field>
+        <button disabled={busy} onClick={save} className={btnPrimary}>{editId ? "Update" : "Register"}</button>
+        {editId && <button onClick={reset} className={btnGhost}>Cancel</button>}
+      </SectionCard>
+      <SectionCard title="Devices" subtitle={data ? `${items.length} registered` : undefined} bodyClassName="p-0">
+        {!data ? <TableSkeleton rows={4} cols={4} /> : items.length === 0 ? (
+          <EmptyState icon={<Smartphone className="w-5 h-5" />} title="No devices registered" hint="Register an employee's device so only that phone can record their attendance." />
+        ) : (
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-border bg-muted/20">{["Employee", "Device ID", "Label", ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+            <tbody className="divide-y divide-border">
+              {pg.pageItems.map(d => { const e = employees.find(x => x.employeeId === d.employeeId); return <tr key={d.id} className="hover:bg-muted/20 transition-colors"><td className="px-4 py-2.5 font-semibold">{e?.name ?? d.employeeId}</td><td className="px-4 py-2.5 font-mono text-xs">{d.deviceId}</td><td className="px-4 py-2.5">{d.label ?? "—"}</td><td className="px-4 py-2.5"><div className="flex items-center gap-1 justify-end"><IconButton icon={<Pencil className="w-4 h-4" />} title="Edit label" onClick={() => openEdit(d)} /><IconButton icon={<Trash2 className="w-4 h-4" />} title="Delete" tone="hover:text-red-600" onClick={() => ask({ title: "Delete device?", body: `Unregister this device${e ? ` for ${e.name}` : ""}? The employee may need to re-register it.`, onConfirm: () => del(d.id) })} /></div></td></tr>; })}
+            </tbody>
+          </table>
+        )}
+      </SectionCard>
       {confirmNode}
       <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} />
     </div>
@@ -1790,14 +1902,9 @@ function DashboardTab({ token, onNav }: { token: string; onNav: (tab: string) =>
   const dayLabel = (ymd: string) => { const dt = new Date(ymd + "T00:00:00"); return `${dt.toLocaleDateString("en-US", { weekday: "short" })} ${dt.getDate()}`; };
   return (
     <div className="space-y-4">
+      <TabIntro title="Dashboard" subtitle={`Today's attendance overview · ${t.date}`} />
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-        {kpiCards.map(c => (
-          <div key={c.label} className={`rounded-xl border p-3 ${c.bg}`}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{c.label}</p>
-            <p className={`text-2xl font-bold tabular-nums ${c.tone}`}>{c.value}</p>
-            <p className="text-[10px] text-muted-foreground h-3">{c.sub ?? "today"}</p>
-          </div>
-        ))}
+        {kpiCards.map(c => <StatCard key={c.label} label={c.label} value={c.value} sub={c.sub ?? "today"} tone={c.tone} bg={c.bg} />)}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1968,31 +2075,23 @@ function RekapKehadiranTab({ token, attendance, employees }: { token: string; at
     { label: "Attendance Rate", value: `${rate}%`, tone: "text-primary", bg: "bg-primary/5 border-primary/20", sub: `${checkedIn}/${totalEmp} checked in` },
   ];
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <TabIntro title="Attendance Summary" subtitle="Today's live status + monthly recap · click a row for daily detail"
+        action={<><input type="month" className={fieldInput} value={period} onChange={e => setPeriod(e.target.value)} /><button disabled={!rows.length} onClick={exportCsv} className={btnGhost}><Download className="w-4 h-4" />Export CSV</button></>} />
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-        {kpiCards.map(c => (
-          <div key={c.label} className={`rounded-xl border p-3 ${c.bg}`}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{c.label}</p>
-            <p className={`text-2xl font-bold tabular-nums ${c.tone}`}>{c.value}</p>
-            <p className="text-[10px] text-muted-foreground h-3">{c.sub ?? "today"}</p>
-          </div>
-        ))}
+        {kpiCards.map(c => <StatCard key={c.label} label={c.label} value={c.value} sub={c.sub ?? "today"} tone={c.tone} bg={c.bg} />)}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-end gap-2">
-          <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Period</label><input type="month" className="px-3 py-2 rounded-lg border border-border text-sm" value={period} onChange={e => setPeriod(e.target.value)} /></div>
-          {busy && <span className="text-xs text-muted-foreground pb-2">Loading…</span>}
-        </div>
-        <button disabled={!rows.length} onClick={exportCsv} className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40 disabled:opacity-40"><Download className="w-4 h-4" />Export CSV</button>
-      </div>
-      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      <div className="bg-card rounded-xl border border-border overflow-x-auto">
+      {err && <ErrorBanner>{err}</ErrorBanner>}
+      <SectionCard title={`Employees · ${period}`} subtitle={rows.length ? `${rows.length} employees` : undefined} icon={<Activity className="w-4 h-4" />} bodyClassName="p-0">
+        {busy && rows.length === 0 ? <TableSkeleton rows={6} cols={6} /> : rows.length === 0 ? (
+          <EmptyState icon={<Activity className="w-5 h-5" />} title="No data for this period" hint="No employees or attendance records for the selected month." />
+        ) : (
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="border-b border-border bg-muted/30">
+          <thead><tr className="border-b border-border bg-muted/20">
             {["Employee", "Today's Status", "Check-in", "Late Today", "Days Worked", "Late (days)", "Late Min (mo)", "Absent", ""].map(h => <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground uppercase whitespace-nowrap">{h}</th>)}
           </tr></thead>
           <tbody className="divide-y divide-border">
-            {rows.length === 0 && !busy && <tr><td colSpan={9} className="px-3 py-8 text-center text-muted-foreground text-sm">No employees / data for this period.</td></tr>}
             {mainPg.pageItems.map(r => {
               const t = today(r.employeeId);
               const lmToday = lateMinOf(t?.checkIn, r.schedule_in);
@@ -2017,7 +2116,9 @@ function RekapKehadiranTab({ token, attendance, employees }: { token: string; at
             })}
           </tbody>
         </table>
-      </div>
+        </div>
+        )}
+      </SectionCard>
       <Pagination page={mainPg.page} totalPages={mainPg.totalPages} total={mainPg.total} from={mainPg.from} to={mainPg.to} onPage={mainPg.setPage} />
     </div>
   );
@@ -2062,32 +2163,47 @@ function RiwayatTab({ token, employees }: { token: string; employees: ApiEmploye
     downloadText(`history-${empName}-${start || "awal"}_sd_${end || "akhir"}.csv`, csv);
   };
   const pg = usePagination(rows);
-  const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
+  const statTone: Record<string, { tone: string; bg: string }> = {
+    hadir: { tone: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200" },
+    terlambat: { tone: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
+    izin: { tone: "text-blue-700", bg: "bg-blue-50 border-blue-200" },
+    cuti: { tone: "text-purple-700", bg: "bg-purple-50 border-purple-200" },
+    alpha: { tone: "text-red-700", bg: "bg-red-50 border-red-200" },
+    absent: { tone: "text-red-700", bg: "bg-red-50 border-red-200" },
+  };
   return (
-    <div className="space-y-3">
-      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Employee</label><select className={inputCls} value={empId} onChange={e => setEmpId(e.target.value)}><option value="">Select…</option>{employees.map(e => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}</select></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">From</label><input type="date" className={inputCls} value={start} onChange={e => setStart(e.target.value)} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">To</label><input type="date" className={inputCls} value={end} onChange={e => setEnd(e.target.value)} /></div>
-        <button disabled={busy} onClick={load} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">{busy ? "Loading…" : "Show"}</button>
-        <button disabled={!rows.length} onClick={exportCsv} title="Export CSV (Excel)" className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm font-semibold hover:bg-muted/40 disabled:opacity-40"><Download className="w-4 h-4" />Export CSV</button>
-      </div>
+    <div className="space-y-4">
+      <TabIntro title="Attendance History" subtitle="Per-employee check-in/out log with date range filter & CSV export"
+        action={<button disabled={!rows.length} onClick={exportCsv} title="Export CSV (Excel)" className={btnGhost}><Download className="w-4 h-4" />Export CSV</button>} />
+      {err && <ErrorBanner>{err}</ErrorBanner>}
+      <SectionCard title="Filter" icon={<Calendar className="w-4 h-4" />} bodyClassName="p-4 flex flex-wrap items-end gap-2">
+        <Field label="Employee"><select className={fieldInput} value={empId} onChange={e => setEmpId(e.target.value)}><option value="">Select…</option>{employees.map(e => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}</select></Field>
+        <Field label="From"><input type="date" className={fieldInput} value={start} onChange={e => setStart(e.target.value)} /></Field>
+        <Field label="To"><input type="date" className={fieldInput} value={end} onChange={e => setEnd(e.target.value)} /></Field>
+        <button disabled={busy} onClick={load} className={btnPrimary}>{busy ? "Loading…" : "Show"}</button>
+      </SectionCard>
       {rows.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <span className="px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs font-bold">Total: {summary.total} days</span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <StatCard label="Total days" value={summary.total} tone="text-primary" bg="bg-primary/5 border-primary/20" />
           {Object.keys(summary).filter(k => k !== "total").map(k => (
-            <span key={k} className="px-3 py-1.5 rounded-lg bg-card border border-border text-xs font-semibold">{STAT_LABEL[k] || k}: {summary[k]}</span>
+            <StatCard key={k} label={STAT_LABEL[k] || k} value={summary[k]} tone={statTone[k]?.tone} bg={statTone[k]?.bg} />
           ))}
         </div>
       )}
-      <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Date", "Check-in", "Check-out", "Status", "Method"].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
-          <tbody className="divide-y divide-border">
-            {rows.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground text-sm">Select an employee then "Show".</td></tr>}
-            {pg.pageItems.map((r, i) => <tr key={i} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-mono">{r.date}</td><td className="px-4 py-2.5 font-mono">{r.check_in ?? "—"}</td><td className="px-4 py-2.5 font-mono">{r.check_out ?? "—"}</td><td className="px-4 py-2.5"><StatusBadge status={r.status as AttendanceRecord["status"]} /></td><td className="px-4 py-2.5 text-xs">{r.method ?? "—"}</td></tr>)}
-          </tbody></table>
-      </div>
+      <SectionCard title={`Records${empName ? ` — ${empName}` : ""}`} subtitle={rows.length ? `${rows.length} record${rows.length === 1 ? "" : "s"}` : undefined} bodyClassName="p-0">
+        {busy && rows.length === 0 ? (
+          <TableSkeleton rows={6} cols={5} />
+        ) : rows.length === 0 ? (
+          <EmptyState icon={<Calendar className="w-5 h-5" />} title="No records to show" hint='Pick an employee and (optionally) a date range, then click "Show".' />
+        ) : (
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-border bg-muted/20">{["Date", "Check-in", "Check-out", "Status", "Method"].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+            <tbody className="divide-y divide-border">
+              {pg.pageItems.map((r, i) => <tr key={i} className="hover:bg-muted/20 transition-colors"><td className="px-4 py-2.5 font-mono">{r.date}</td><td className="px-4 py-2.5 font-mono">{r.check_in ?? "—"}</td><td className="px-4 py-2.5 font-mono">{r.check_out ?? "—"}</td><td className="px-4 py-2.5"><StatusBadge status={r.status as AttendanceRecord["status"]} /></td><td className="px-4 py-2.5 text-xs"><MethodBadge method={(r.method as AttendanceRecord["method"]) ?? "manual"} /></td></tr>)}
+            </tbody>
+          </table>
+        )}
+      </SectionCard>
       <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} />
     </div>
   );
@@ -2121,43 +2237,48 @@ function PengaturanTab({ token }: { token: string }) {
     try { await api.registerCompany(token, { company_name: newCo.trim() }); setNewCo(""); setMsg("Company/branch added"); }
     catch (e: any) { setErr(e?.message || "Failed"); } finally { setBusy(false); }
   };
-  const inputCls = "w-full px-3 py-2 rounded-lg border border-border text-sm";
-  if (!co) return <p className="text-muted-foreground text-sm">{err || "Loading…"}</p>;
+  const ff = fieldInput + " w-full";
+  if (!co) return (
+    <div className="space-y-4 max-w-2xl">
+      <Skeleton className="h-7 w-56" />
+      <Skeleton className="h-48 w-full" />
+      <Skeleton className="h-40 w-full" />
+    </div>
+  );
   return (
-    <div className="space-y-4">
-      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      {msg && <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5" />{msg}</div>}
-      <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-        <p className="font-semibold text-sm">Company Profile</p>
-        <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Name</label><input className={inputCls} value={co.name ?? ""} onChange={e => setCo({ ...co, name: e.target.value })} /></div>
-        <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Address</label><input className={inputCls} value={co.address ?? ""} onChange={e => setCo({ ...co, address: e.target.value })} /></div>
+    <div className="space-y-4 max-w-2xl">
+      <TabIntro title="Company Settings" subtitle="Profile, attendance mode, timezone, currency & branches" />
+      {err && <ErrorBanner>{err}</ErrorBanner>}
+      {msg && <InfoBanner>{msg}</InfoBanner>}
+      <SectionCard title="Company Profile" icon={<Building2 className="w-4 h-4" />} bodyClassName="p-5 space-y-3">
+        <Field label="Name"><input className={ff} value={co.name ?? ""} onChange={e => setCo({ ...co, name: e.target.value })} /></Field>
+        <Field label="Address"><input className={ff} value={co.address ?? ""} onChange={e => setCo({ ...co, address: e.target.value })} /></Field>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Clock-in</label><input type="time" className={inputCls} value={co.work_hours?.start ?? ""} onChange={e => setCo({ ...co, work_hours: { ...co.work_hours, start: e.target.value } })} /></div>
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Clock-out</label><input type="time" className={inputCls} value={co.work_hours?.end ?? ""} onChange={e => setCo({ ...co, work_hours: { ...co.work_hours, end: e.target.value } })} /></div>
+          <Field label="Clock-in"><input type="time" className={ff} value={co.work_hours?.start ?? ""} onChange={e => setCo({ ...co, work_hours: { ...co.work_hours, start: e.target.value } })} /></Field>
+          <Field label="Clock-out"><input type="time" className={ff} value={co.work_hours?.end ?? ""} onChange={e => setCo({ ...co, work_hours: { ...co.work_hours, end: e.target.value } })} /></Field>
         </div>
-        <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Logo URL</label><input className={inputCls} placeholder="https://…" value={co.logo_url ?? ""} onChange={e => setCo({ ...co, logo_url: e.target.value })} /></div>
-        <button disabled={busy} onClick={saveProfile} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Save Profile</button>
-      </div>
-      {settings && <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-        <p className="font-semibold text-sm">App Settings</p>
-        <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Attendance Mode</label>
-          <select className={inputCls} value={settings.attendance_mode} onChange={e => setSettings({ ...settings, attendance_mode: e.target.value })}><option value="qr_dynamic">Dynamic QR</option><option value="qr_static">Static QR</option></select></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Time Zone</label><input className={inputCls} value={settings.timezone ?? ""} onChange={e => setSettings({ ...settings, timezone: e.target.value })} /></div>
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Language</label><input className={inputCls} value={settings.language ?? ""} onChange={e => setSettings({ ...settings, language: e.target.value })} /></div>
-          <div><label className="text-[11px] font-semibold text-muted-foreground uppercase block mb-1">Currency (salary & payroll)</label>
-            <select className={inputCls} value={settings.base_currency ?? "IDR"} onChange={e => setSettings({ ...settings, base_currency: e.target.value })}>
-              {["IDR", "USD", "EUR", "GBP", "SGD", "MYR", "JPY", "CNY", "AUD", "INR", "AED", "SAR"].map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <p className="text-[10px] text-muted-foreground mt-1">The company's operating currency. All salary/payslip amounts & rate labels follow this — not pinned to Rupiah.</p>
+        <Field label="Logo URL"><input className={ff} placeholder="https://…" value={co.logo_url ?? ""} onChange={e => setCo({ ...co, logo_url: e.target.value })} /></Field>
+        <button disabled={busy} onClick={saveProfile} className={btnPrimary}><Check className="w-4 h-4" />Save Profile</button>
+      </SectionCard>
+      {settings && (
+        <SectionCard title="App Settings" icon={<Timer className="w-4 h-4" />} bodyClassName="p-5 space-y-3">
+          <Field label="Attendance Mode"><select className={ff} value={settings.attendance_mode} onChange={e => setSettings({ ...settings, attendance_mode: e.target.value })}><option value="qr_dynamic">Dynamic QR</option><option value="qr_static">Static QR</option></select></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Time Zone"><input className={ff} value={settings.timezone ?? ""} onChange={e => setSettings({ ...settings, timezone: e.target.value })} /></Field>
+            <Field label="Language"><input className={ff} value={settings.language ?? ""} onChange={e => setSettings({ ...settings, language: e.target.value })} /></Field>
+            <Field label="Currency (salary & payroll)" className="col-span-2">
+              <select className={ff} value={settings.base_currency ?? "IDR"} onChange={e => setSettings({ ...settings, base_currency: e.target.value })}>
+                {["IDR", "USD", "EUR", "GBP", "SGD", "MYR", "JPY", "CNY", "AUD", "INR", "AED", "SAR"].map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <p className="text-[10px] text-muted-foreground mt-1">The company's operating currency. All salary/payslip amounts & rate labels follow this — not pinned to Rupiah.</p>
+            </Field>
           </div>
-        </div>
-        <button disabled={busy} onClick={saveSettings} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">Save Settings</button>
-      </div>}
-      <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-        <p className="font-semibold text-sm">Add Company / Branch</p>
-        <div className="flex gap-2"><input className={inputCls} placeholder="New company/branch name" value={newCo} onChange={e => setNewCo(e.target.value)} /><button disabled={busy} onClick={addCompany} className="px-4 py-2 rounded-lg bg-foreground text-background text-sm font-semibold disabled:opacity-50 whitespace-nowrap">Add</button></div>
-      </div>
+          <button disabled={busy} onClick={saveSettings} className={btnPrimary}><Check className="w-4 h-4" />Save Settings</button>
+        </SectionCard>
+      )}
+      <SectionCard title="Add Company / Branch" icon={<Building2 className="w-4 h-4" />} bodyClassName="p-5">
+        <div className="flex gap-2"><input className={ff} placeholder="New company/branch name" value={newCo} onChange={e => setNewCo(e.target.value)} /><button disabled={busy} onClick={addCompany} className={btnPrimary + " whitespace-nowrap"}>Add</button></div>
+      </SectionCard>
     </div>
   );
 }
@@ -2167,16 +2288,25 @@ function LogTab({ token }: { token: string }) {
   const { data, error: err } = usePolledData(() => api.logs(token));
   const rows = data ?? [];
   const pg = usePagination(rows);
+  const fmtTs = (s: string) => { try { return new Date(s).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }); } catch { return s; } };
   return (
-    <div className="space-y-3">
-      {err && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
-      <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Time", "Action", "Details"].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
-          <tbody className="divide-y divide-border">
-            {rows.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-muted-foreground text-sm">No logs yet.</td></tr>}
-            {pg.pageItems.map(l => <tr key={l.id} className="hover:bg-muted/20"><td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">{l.created_at}</td><td className="px-4 py-2.5 font-semibold text-xs">{l.action}</td><td className="px-4 py-2.5 text-xs text-muted-foreground">{l.detail ?? "—"}</td></tr>)}
-          </tbody></table>
-      </div>
+    <div className="space-y-4">
+      <TabIntro title="Audit Log" subtitle="Admin actions recorded for security & compliance (read-only)" />
+      {err && <ErrorBanner>{err}</ErrorBanner>}
+      <SectionCard title="Activity" subtitle={data ? `${rows.length} ${rows.length === 1 ? "entry" : "entries"}` : undefined} icon={<BarChart2 className="w-4 h-4" />} bodyClassName="p-0">
+        {!data ? (
+          <TableSkeleton rows={8} cols={3} />
+        ) : rows.length === 0 ? (
+          <EmptyState icon={<BarChart2 className="w-5 h-5" />} title="No activity yet" hint="Admin actions (create/update/delete, sign-ins) will appear here as they happen." />
+        ) : (
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-border bg-muted/20">{["Time", "Action", "Details"].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+            <tbody className="divide-y divide-border">
+              {pg.pageItems.map(l => <tr key={l.id} className="hover:bg-muted/20 transition-colors"><td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap text-muted-foreground">{fmtTs(l.created_at)}</td><td className="px-4 py-2.5"><span className="inline-block font-mono text-[11px] font-semibold px-2 py-0.5 rounded-md bg-muted text-foreground">{l.action}</span></td><td className="px-4 py-2.5 text-xs text-muted-foreground font-mono truncate max-w-md">{l.detail ?? "—"}</td></tr>)}
+            </tbody>
+          </table>
+        )}
+      </SectionCard>
       <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} />
     </div>
   );
@@ -2220,7 +2350,7 @@ function PayrollTab({ token }: { token: string }) {
   const [rEditId, setREditId] = useState<string | null>(null); // edit aturan otomatis
   const { ask, confirmNode } = useConfirm();
   const [currency, setCurrency] = useState("IDR"); // mata uang TAMPILAN slip
-  const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
+  const inputCls = fieldInput;
 
   // Satu sumber data + poll; JEDA saat form/modal terbuka (cegah input ke-reset).
   const paused = cForm.name.trim() !== "" || rForm.name.trim() !== "" || detail !== null || !!cEditId || !!rEditId;
@@ -2296,26 +2426,26 @@ ${metrics ? `<div class="sec">Attendance Metrics</div><table>${metrics}</table>`
 
   return (
     <div className="space-y-4">
-      {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
-      {msg && <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5" />{msg}</div>}
+      <TabIntro title="Payroll" subtitle="Auto-computed from attendance (late, overtime, absent, leave) + components & rules" />
+      {(err || loadErr) && <ErrorBanner>{err || loadErr}</ErrorBanner>}
+      {msg && <InfoBanner>{msg}</InfoBanner>}
 
       {/* Proses payroll */}
-      <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-3">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Period</label><input type="month" className={inputCls} value={period} onChange={e => setPeriod(e.target.value)} /></div>
-        <button disabled={busy} onClick={() => setConfirmRun(true)} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"><Download className="w-4 h-4" />{busy ? "Processing…" : "Run Payroll"}</button>
-        <p className="text-xs text-muted-foreground">Auto-pulled from attendance (late, overtime, absent, leave) + components & rules below.</p>
-      </div>
+      <SectionCard title="Run payroll" icon={<Download className="w-4 h-4" />} bodyClassName="p-4 flex flex-wrap items-end gap-3">
+        <Field label="Period"><input type="month" className={inputCls} value={period} onChange={e => setPeriod(e.target.value)} /></Field>
+        <button disabled={busy} onClick={() => setConfirmRun(true)} className={btnPrimary}><Download className="w-4 h-4" />{busy ? "Processing…" : "Run Payroll"}</button>
+        <p className="text-xs text-muted-foreground">Slips are generated from this period's attendance + active components & rules below.</p>
+      </SectionCard>
 
       {/* Komponen gaji */}
-      <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-        <p className="font-semibold text-sm">Salary Components (allowances / deductions)</p>
+      <SectionCard title="Salary Components" subtitle="Allowances (+) / deductions (−)" icon={<Wallet className="w-4 h-4" />} bodyClassName="p-4 space-y-3">
         <div className="flex flex-wrap items-end gap-2">
           <input className={inputCls} placeholder="Name (e.g. Transport)" value={cForm.name} onChange={e => setCForm(f => ({ ...f, name: e.target.value }))} />
           <select className={inputCls} value={cForm.type} onChange={e => setCForm(f => ({ ...f, type: e.target.value }))}><option value="earning">Allowance (+)</option><option value="deduction">Deduction (−)</option></select>
           <select className={inputCls} value={cForm.basis} onChange={e => setCForm(f => ({ ...f, basis: e.target.value }))}>{Object.entries(BASIS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
           <input type="number" className={inputCls + " w-32"} placeholder="Value" value={cForm.value} onChange={e => setCForm(f => ({ ...f, value: Number(e.target.value) }))} />
-          <button disabled={busy} onClick={saveComp} className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">{cEditId ? "Update" : "Add"}</button>
-          {cEditId && <button onClick={resetComp} className="px-3 py-2 rounded-lg border border-border text-sm">Cancel</button>}
+          <button disabled={busy} onClick={saveComp} className={btnPrimary}>{cEditId ? "Update" : "Add"}</button>
+          {cEditId && <button onClick={resetComp} className={btnGhost}>Cancel</button>}
         </div>
         <div className="flex flex-wrap gap-2">
           {comps.length === 0 && <p className="text-xs text-muted-foreground">No components yet.</p>}
@@ -2327,11 +2457,10 @@ ${metrics ? `<div class="sec">Attendance Metrics</div><table>${metrics}</table>`
             </span>
           ))}
         </div>
-      </div>
+      </SectionCard>
 
       {/* Aturan otomatis */}
-      <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-        <p className="font-semibold text-sm">Automatic Rules (conditional triggers)</p>
+      <SectionCard title="Automatic Rules" subtitle="Conditional bonus/deduction triggers" icon={<Zap className="w-4 h-4" />} bodyClassName="p-4 space-y-3">
         <div className="flex flex-wrap items-end gap-2">
           <input className={inputCls} placeholder="Rule name" value={rForm.name} onChange={e => setRForm(f => ({ ...f, name: e.target.value }))} />
           <select className={inputCls} value={rForm.metric} onChange={e => setRForm(f => ({ ...f, metric: e.target.value }))}>{Object.entries(METRIC_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
@@ -2339,27 +2468,27 @@ ${metrics ? `<div class="sec">Attendance Metrics</div><table>${metrics}</table>`
           <input type="number" className={inputCls + " w-24"} placeholder="Threshold" value={rForm.threshold} onChange={e => setRForm(f => ({ ...f, threshold: Number(e.target.value) }))} />
           <select className={inputCls} value={rForm.action} onChange={e => setRForm(f => ({ ...f, action: e.target.value }))}><option value="deduction">Deduction</option><option value="bonus">Bonus</option></select>
           <input type="number" className={inputCls + " w-32"} placeholder={`Amount (${baseCur})`} value={rForm.amount} onChange={e => setRForm(f => ({ ...f, amount: Number(e.target.value) }))} />
-          <button disabled={busy} onClick={saveRule} className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">{rEditId ? "Update" : "Add"}</button>
-          {rEditId && <button onClick={resetRule} className="px-3 py-2 rounded-lg border border-border text-sm">Cancel</button>}
+          <button disabled={busy} onClick={saveRule} className={btnPrimary}>{rEditId ? "Update" : "Add"}</button>
+          {rEditId && <button onClick={resetRule} className={btnGhost}>Cancel</button>}
         </div>
         <div className="space-y-1">
           {rules.length === 0 && <p className="text-xs text-muted-foreground">No rules yet.</p>}
           {rules.map(r => (
             <div key={r.id} className={`flex items-center justify-between text-xs bg-muted/30 rounded-lg px-3 py-1.5 ${rEditId === r.id ? "ring-2 ring-primary/40" : ""}`}>
               <span><b>{r.name}</b> — if {METRIC_LABEL[r.metric]} {r.op === "gt" ? ">" : "≥"} {r.threshold} → {r.action === "bonus" ? "bonus" : "deduction"} {fmtMoney(r.amount, baseCur)}</span>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button title="Edit" onClick={() => editRule(r)} className="text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                <button title="Delete" onClick={() => delRule(r)} className="text-muted-foreground hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <IconButton icon={<Pencil className="w-3.5 h-3.5" />} title="Edit" onClick={() => editRule(r)} />
+                <IconButton icon={<Trash2 className="w-3.5 h-3.5" />} title="Delete" tone="hover:text-red-600" onClick={() => delRule(r)} />
               </div>
             </div>
           ))}
         </div>
-      </div>
+      </SectionCard>
 
       {/* Slip hasil run terakhir */}
       {slips && (
-        <div className="bg-card rounded-xl border border-border overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between">
+        <div className="bg-card rounded-2xl border border-border overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center justify-between">
             <span className="text-sm font-semibold">Payslips ({slips.length})</span>
             <div className="flex items-center gap-3">
               <button onClick={exportSlipsCsv} className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"><Download className="w-3.5 h-3.5" />Export CSV</button>
@@ -2402,20 +2531,18 @@ ${metrics ? `<div class="sec">Attendance Metrics</div><table>${metrics}</table>`
       )}
 
       {/* Riwayat run */}
-      <div className="bg-card rounded-xl border border-border p-4 space-y-2">
-        <p className="font-semibold text-sm">Payroll Run History</p>
-        {runs.length === 0 && <p className="text-xs text-muted-foreground">No payroll runs yet.</p>}
-        {runPg.pageItems.map(r => (
+      <SectionCard title="Payroll Run History" icon={<Download className="w-4 h-4" />} bodyClassName="p-4 space-y-2">
+        {runs.length === 0 ? <p className="text-xs text-muted-foreground py-2">No payroll runs yet.</p> : runPg.pageItems.map(r => (
           <div key={r.runId} className="flex items-center justify-between text-xs bg-muted/30 rounded-lg px-3 py-1.5">
             <span>Period <b>{r.period}</b> · {r.count} slips · total {fmtMoney(r.totalNet, baseCur)}</span>
-            <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0">
               <button onClick={() => viewSlips(r.runId)} className="text-primary font-semibold hover:underline">View slips</button>
-              <button title="Delete run" onClick={() => delRun(r)} className="text-muted-foreground hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+              <IconButton icon={<Trash2 className="w-3.5 h-3.5" />} title="Delete run" tone="hover:text-red-600" onClick={() => delRun(r)} />
             </div>
           </div>
         ))}
         <Pagination page={runPg.page} totalPages={runPg.totalPages} total={runPg.total} from={runPg.from} to={runPg.to} onPage={runPg.setPage} />
-      </div>
+      </SectionCard>
 
       {/* Detail slip (modal sederhana) */}
       {detail && (
@@ -2488,40 +2615,47 @@ function KursTab({ token }: { token: string }) {
   const del = (r: ExchangeRate) => ask({ title: "Delete exchange rate?", body: `Remove the ${r.currency} rate dated ${r.date}?`, onConfirm: () => api.deleteExchangeRate(token, r.id).then(reload) });
   const latest: Record<string, ExchangeRate> = {};
   for (const r of rates) if (!latest[r.currency]) latest[r.currency] = r;
-  const inputCls = "px-3 py-2 rounded-lg border border-border text-sm";
   return (
-    <div className="space-y-3">
-      {(err || loadErr) && <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" />{err || loadErr}</div>}
-      <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap items-end gap-2">
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Currency</label><input className={inputCls + " w-28 uppercase"} placeholder="USD" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Rate (1 unit = {baseCur})</label><input type="number" className={inputCls + " w-40"} placeholder="16000" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: Number(e.target.value) }))} /></div>
-        <div className="flex flex-col"><label className="text-[11px] font-semibold text-muted-foreground uppercase mb-1">Date</label><input type="date" className={inputCls} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
-        <button disabled={busy} onClick={save} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">{editId ? "Update Rate" : "Save Rate"}</button>
-        {editId && <button onClick={reset} className="px-3 py-2 rounded-lg border border-border text-sm">Cancel</button>}
-      </div>
-      <p className="text-xs text-muted-foreground">Enter the official rate (e.g. mid-market). Payslip conversion uses the latest rate per currency, relative to the company base currency. <b>1 {form.currency || "USD"} = {form.rate ? fmtMoney(Number(form.rate), baseCur) : `… ${baseCur}`}</b></p>
-
-      <div className="flex flex-wrap gap-2">
-        {Object.values(latest).map(r => (
-          <span key={r.currency} className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-semibold">1 {r.currency} = {fmtMoney(r.rate, baseCur)} <span className="opacity-60 font-normal">({r.date})</span></span>
-        ))}
-        {rates.length === 0 && <p className="text-xs text-muted-foreground">No rates yet.</p>}
-      </div>
-
-      {rates.length > 0 && (
-        <div className="bg-card rounded-xl border border-border overflow-hidden">
-          <table className="w-full text-sm"><thead><tr className="border-b border-border bg-muted/30">{["Date", "Currency", `Rate (${baseCur})`, ""].map(h => <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
-            <tbody className="divide-y divide-border">
-              {pg.pageItems.map(r => (
-                <tr key={r.id} className="hover:bg-muted/20">
-                  <td className="px-4 py-2 font-mono">{r.date}</td><td className="px-4 py-2 font-semibold">{r.currency}</td><td className="px-4 py-2 font-mono">{fmtMoney(r.rate, baseCur)}</td>
-                  <td className="px-4 py-2"><div className="flex items-center gap-2"><button title="Edit" onClick={() => openEdit(r)} className="text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button><button title="Delete" onClick={() => del(r)} className="text-muted-foreground hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button></div></td>
-                </tr>
-              ))}
-            </tbody></table>
-          <div className="px-4 pb-3"><Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} /></div>
+    <div className="space-y-4">
+      <TabIntro title="Exchange Rates" subtitle={`Daily rates for multi-currency payslip conversion · base ${baseCur}`} />
+      {(err || loadErr) && <ErrorBanner>{err || loadErr}</ErrorBanner>}
+      <SectionCard title={editId ? "Edit rate" : "Add rate"} icon={<RotateCcw className="w-4 h-4" />} bodyClassName="p-4 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Currency"><input className={fieldInput + " w-28 uppercase"} placeholder="USD" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} /></Field>
+          <Field label={`Rate (1 unit = ${baseCur})`}><input type="number" className={fieldInput + " w-40"} placeholder="16000" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: Number(e.target.value) }))} /></Field>
+          <Field label="Date"><input type="date" className={fieldInput} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></Field>
+          <button disabled={busy} onClick={save} className={btnPrimary}>{editId ? "Update Rate" : "Save Rate"}</button>
+          {editId && <button onClick={reset} className={btnGhost}>Cancel</button>}
         </div>
-      )}
+        <p className="text-xs text-muted-foreground">Enter the official rate (e.g. mid-market). Payslip conversion uses the latest rate per currency, relative to the base currency. <b>1 {form.currency || "USD"} = {form.rate ? fmtMoney(Number(form.rate), baseCur) : `… ${baseCur}`}</b></p>
+        {Object.values(latest).length > 0 && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            {Object.values(latest).map(r => (
+              <span key={r.currency} className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-semibold">1 {r.currency} = {fmtMoney(r.rate, baseCur)} <span className="opacity-60 font-normal">({r.date})</span></span>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+      <SectionCard title="Rate history" subtitle={ratesData ? `${rates.length} total` : undefined} bodyClassName="p-0">
+        {!ratesData ? <TableSkeleton rows={4} cols={4} /> : rates.length === 0 ? (
+          <EmptyState icon={<RotateCcw className="w-5 h-5" />} title="No rates yet" hint="Add an exchange rate above to enable multi-currency payslips." />
+        ) : (
+          <>
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-border bg-muted/20">{["Date", "Currency", `Rate (${baseCur})`, ""].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">{h}</th>)}</tr></thead>
+              <tbody className="divide-y divide-border">
+                {pg.pageItems.map(r => (
+                  <tr key={r.id} className="hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-2.5 font-mono">{r.date}</td><td className="px-4 py-2.5 font-semibold">{r.currency}</td><td className="px-4 py-2.5 font-mono">{fmtMoney(r.rate, baseCur)}</td>
+                    <td className="px-4 py-2.5"><div className="flex items-center gap-1 justify-end"><IconButton icon={<Pencil className="w-4 h-4" />} title="Edit" onClick={() => openEdit(r)} /><IconButton icon={<Trash2 className="w-4 h-4" />} title="Delete" tone="hover:text-red-600" onClick={() => del(r)} /></div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="px-4 pb-3 pt-1"><Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} from={pg.from} to={pg.to} onPage={pg.setPage} /></div>
+          </>
+        )}
+      </SectionCard>
       {confirmNode}
     </div>
   );
