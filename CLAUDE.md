@@ -12,10 +12,12 @@ REST. UI language is **English** (migrated from Indonesian 2026-06-24); dates/ti
 `en-US` locale. Backend `ApiError` messages are English too. Brand name is **Zylora** (the
 original "Nusantara" mock identity is gone).
 
-> The prototype heritage still shows: there is **no lint/test/typecheck script and no
+> The prototype heritage still shows: there is **no lint/typecheck script and no
 > `tsconfig.json`** (Vite/esbuild strips TS types without checking — type errors do NOT
-> fail the build; review types by reading). And several files are **legacy scaffolding
-> kept for reference** — see "Legacy / dead code" below before extending anything.
+> fail the build; review types by reading). The **only** automated test is the backend
+> integration smoke test (`pnpm test:api`); the frontend has none. And several files are
+> **legacy scaffolding kept for reference** — see "Legacy / dead code" below before
+> extending anything.
 
 ## Commands
 
@@ -31,6 +33,11 @@ pnpm dev          # bare `vite` with NO role → shows a "no role set" placehold
 # ── Backend (Zylora API) ──
 pnpm api          # node server/api/server.mjs → http://127.0.0.2:5181 (no seed by default)
 ZYLORA_SEED=1 pnpm api    # seed demo data if DB empty
+
+# ── Tests (backend only — the sole automated test in the repo) ──
+pnpm test:api     # node --test server/api/test/*.mjs (boots a real seeded server on a temp
+                  # DB, asserts health/version/login/RBAC). Run one test file directly:
+                  #   node --test server/api/test/smoke.mjs
 
 # ── Everything at once (backend + 2 frontends) ──
 pnpm dev:zylora   # ZYLORA_SEED=1 api + employee:5173 + control:5174
@@ -83,9 +90,11 @@ original prototype has been **removed** — do not reintroduce that chrome.
 - **`src/app/api.ts`** is the single REST client. `BASE = VITE_API_URL || <prod EC2>`.
   Every backend call goes through the exported `api` object (typed). When adding endpoints,
   add the typed method here, not ad-hoc `fetch` in components.
-- **`useBackendData(enabled)`** hook (in `App.tsx`, ~line 1534) drives the **control**
-  panel: login (JWT token held in state + persisted to `localStorage`), then **polls** the
-  backend on an interval (`POLL_MS`). `QRDisplayPage` and the employee app poll similarly.
+- Two polling hooks (defined near the bottom of `App.tsx`, ~line 2314): **`usePolledData`**
+  is the generic uniform-poll primitive (interval + pause-while-a-form/modal-is-open) used
+  across tabs and views; **`useBackendData(enabled)`** builds on the same idea to drive the
+  **control** panel — login (JWT token held in state + persisted to `localStorage`), then
+  polls the backend on an interval. `QRDisplayPage` and the employee app poll similarly.
   There is **no live socket** — sync is poll-based.
 - The employee app and display page restore their session from `localStorage` tokens on
   refresh (validating via `api.me` / `api.company`).
@@ -129,21 +138,28 @@ within a time window) → **GPS position** within the location radius (haversine
 
 ### Legacy / dead code — do NOT extend
 
-- **`server/sync-server.mjs`** — an SSE relay from the abandoned "2 real ports sharing
-  state" experiment. The real backend superseded it. `App.tsx` keeps the old relay-mode
-  code blocks "as reference" (commented), and `pnpm dev:2port` still wires the relay, but
-  the live app uses REST polling, not SSE. New work should target the REST backend.
+- **SSE relay (removed).** The old "2 real ports sharing state" experiment —
+  `server/sync-server.mjs` and the `dev:2port` script — was **deleted** (2026-06-28); the
+  REST backend superseded it. What survives is only **commented reference text** in
+  `App.tsx` (~lines 144–151) describing the abandoned relay mode. Do not resurrect SSE; new
+  work targets REST polling.
 - The original single-port prototype demo chrome (model selector, mock data, `:5173`/`:5174`
   tabs) has been stripped (`git log` for "Buang scaffolding prototipe").
+- **`@neondatabase/serverless` is a vestigial dependency.** A Postgres/Neon adapter
+  (`db-pg.mjs`) was prototyped then **removed** (2026-06-28, never wired up). SQLite
+  (`node:sqlite`) is the **sole** backend — do not re-introduce Postgres without a
+  deliberate migration plan.
 
 ## Frontend file map
 
-Almost the entire UI is the single file **`src/app/App.tsx`** (~1800 lines), in commented
+Almost the entire UI is the single file **`src/app/App.tsx`** (~2670 lines), in commented
 sections: helpers/hooks (`useClock`, `useOnline`, `useDynamicQR`, `getDeviceGps`,
 `QrScanner` using `html5-qrcode`) → shared UI (`StatusBadge`, `Avatar`, `MethodBadge`,
 `OfflineBanner`, `UpdateBanner`, `VersionTag`) → the three role views → control-panel tabs
 (`EmployeeManagerTab`, `LokasiTab`, `ShiftTab`, `DeviceTab`, `RiwayatTab`,
-`PengaturanTab`, `LogTab`, `PayrollTab`, `KursTab`) → `useBackendData` → root `App`.
+`PengaturanTab`, `LogTab`, `PayrollTab`, `KursTab`) → `usePolledData`/`useBackendData` →
+root `App`. The sibling dirs `src/app/{hooks,views,utils,data}/` are **empty placeholder
+scaffolding** (nothing imports from them) — App.tsx is still self-contained.
 
 `react-router` is a dependency but **not used** — navigation is local component state. The
 48 `src/app/components/ui/*` files are **shadcn/ui** (Radix) shipped with the export but
@@ -167,7 +183,7 @@ brand hex** (`bg-[#1B3D72]`, `bg-[#0D1B2A]`). Match the surrounding style when e
 ## Versioning & build plumbing (`vite.config.ts`)
 
 - **`version.json` (repo root) is the single source of truth** for product identity
-  (SemVer `1.0.0`, name, channel). `vite.config.ts` reads it and injects
+  (currently SemVer `1.1.0`, name, channel, `apiContract`). `vite.config.ts` reads it and injects
   `import.meta.env.VITE_APP_VERSION` / `_NAME` / `_PRODUCT` / `_CHANNEL` / `_BUILD_SHA` /
   `_BUILD_DATE`. The backend reads the same file (or its deployed copy) for `/api/version`.
   `server/api/version.json` is a generated/stamped copy and is **gitignored** — edit the
@@ -193,6 +209,10 @@ brand hex** (`bg-[#1B3D72]`, `bg-[#0D1B2A]`). Match the surrounding style when e
   lacks the Android SDK/Gradle. See `android-app/README.md` (appId `id.zylora.absensi`).
 - **Desktop installer:** `desktop-app/` (Electron wrapping the `control` PWA, `--base ./`).
   Built per-OS in CI (`.github/workflows/desktop-control.yml`). See `desktop-app/README.md`.
+- **CI tests:** `.github/workflows/api-test.yml` runs the backend smoke test on Node 22
+  (no install — the backend is zero-dep), triggered by pushes/PRs touching `server/api/**`.
+  The APK/desktop workflows install with `npm ci`, so the committed per-subproject locks
+  (`android-app/package-lock.json`, `desktop-app/package-lock.json`) must stay in sync.
 
 ## Conventions
 
@@ -202,6 +222,17 @@ brand hex** (`bg-[#1B3D72]`, `bg-[#0D1B2A]`). Match the surrounding style when e
 - `vite.config.ts` warns not to remove the React or Tailwind plugins, and not to add
   `.css/.ts/.tsx` to `assetsInclude`.
 - Commit messages in this repo are **Indonesian + leading emoji** (see `git log`).
+
+## Project docs (read when relevant)
+
+- **`server/api/README.md`** — authoritative backend/API reference (read before changing API behavior).
+- **`docs/LANJUTAN.md`** — runbook: what is live vs pending, EC2 access, the
+  frontend-rebuild-and-deploy step that lags behind the backend. Credentials are referenced,
+  not embedded.
+- **`docs/AUDIT-2026-06-28.md`** — full security audit (geofence/multi-tenant/payroll
+  findings) with a remediation-status log. The `security/audit-fixes-2026-06` branch tracks
+  the fixes; check this before touching auth, geofence (`attendance-core.mjs`), or payroll.
+- **`.design-sync/NOTES.md`** — see below.
 
 ## Design-sync tooling (auxiliary, not the app)
 
