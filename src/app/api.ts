@@ -9,6 +9,16 @@
 const BASE =
   (import.meta as any).env?.VITE_API_URL || "https://api.13-218-74-178.sslip.io";
 
+export type ApiDashboard = {
+  today: { date: string; present: number; late: number; onLeave: number; absent: number; total: number; attendanceRate: number };
+  trend: Array<{ date: string; checkedIn: number; late: number }>;
+  pendingLeaves: number;
+  locationCount: number;
+  headcountByDept: Array<{ department: string; count: number }>;
+  month: { period: string; lateIncidents: number; records: number };
+  recentActivity: Array<{ action: string; detail: string | null; created_at: string }>;
+};
+
 export type ApiAttendanceRow = {
   employeeId: string; name: string; department: string;
   date: string; check_in: string | null; check_out: string | null;
@@ -129,6 +139,10 @@ export const api = {
     req("/api/control/logout", { method: "POST", token }),
   controlRegister: (body: { name: string; email: string; password: string; company_name: string }) =>
     req<{ adminId: string; companyId: string }>("/api/control/register", { method: "POST", body }),
+
+  // Dashboard ringkasan agregat (server-side) — KPI hari ini + tren 7 hari + dll.
+  dashboard: (token: string) =>
+    req<ApiDashboard>("/api/dashboard", { token }),
 
   // Dashboard admin (butuh token)
   attendance: (token: string, date?: string) =>

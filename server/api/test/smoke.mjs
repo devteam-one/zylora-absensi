@@ -105,3 +105,25 @@ test("Control boleh akses /api/company (200)", async () => {
   const j = await r.json();
   assert.ok(j.companyId);
 });
+
+test("GET /api/dashboard → ringkasan agregat (bentuk benar)", async () => {
+  const ctl = await (await post("/api/control/login", CONTROL)).json();
+  const r = await getJson("/api/dashboard", ctl.token);
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  // KPI hari ini
+  assert.ok(j.today && typeof j.today.total === "number", "today.total numerik");
+  assert.ok(typeof j.today.attendanceRate === "number");
+  // Tren tepat 7 hari
+  assert.ok(Array.isArray(j.trend) && j.trend.length === 7, "trend 7 hari");
+  // Bagian agregat lain hadir
+  assert.ok(typeof j.pendingLeaves === "number");
+  assert.ok(Array.isArray(j.headcountByDept));
+  assert.ok(Array.isArray(j.recentActivity));
+});
+
+test("RBAC: token karyawan TIDAK boleh akses /api/dashboard (403)", async () => {
+  const emp = await (await post("/api/employee/login", EMPLOYEE)).json();
+  const r = await getJson("/api/dashboard", emp.token);
+  assert.equal(r.status, 403);
+});
